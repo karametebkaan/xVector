@@ -410,7 +410,6 @@ let DOCS = [];           // {id, text, tokens, vec:Float64Array}
 let ENTITIES = [];       // {name, label, docIds, count, aliases}
 let EDGES = [];          // {node1, node2, type, weight}
 let LAST_TABLE = "";     // fully qualified name of the last successful write
-let LAST_GRAPH = { nodes:"", edges:"" };  // fully qualified names of last graph tables
 
 /* ---------------- console ---------------- */
 function log(msg, cls){
@@ -830,7 +829,7 @@ function nodeInserts(entities, opts){
   for (let i=0;i<entities.length;i+=size){
     const rows = entities.slice(i,i+size).map(e =>
       "    ('"+esc(guardName(e.name))+"', "+arrayLit([e.label],"str")+", "+arrayLit(e.docIds,"int")+", "+
-      (e.count||e.docIds.length)+", "+arrayLit(e.aliases,"str")+", '"+opts.createdAt+"')");
+      (parseInt(e.count,10)||e.docIds.length)+", "+arrayLit(e.aliases,"str")+", '"+opts.createdAt+"')");
     out.push("INSERT INTO "+t+"\n"+cols+"\nVALUES\n"+rows.join(",\n"));
   }
   return out;
@@ -1243,8 +1242,6 @@ $("btnStoreGraph").addEventListener("click", async () => {
     const ni = nodeInserts(ENTITIES, opts), ei = edgeInserts(EDGES, opts, th);
     const all = ni.concat(ei); let done = 0;
     for (const stmt of all){ await ksql(stmt); done++; fill.style.width = Math.round(100*done/all.length)+"%"; }
-    LAST_GRAPH = { nodes: graphTableName(opts.prefix,"nodes",opts.stamp,opts.schema),
-                   edges: graphTableName(opts.prefix,"edges",opts.stamp,opts.schema) };
     log("Stored "+ENTITIES.length+" nodes and "+filterEdges(EDGES,th).length+" edges. Post-join via ARRAY_CONTAINS(doc_ids, doc_id).", "ok");
   } catch(e){ log("Graph write failed: "+e.message, "err"); log("The SQL is still valid — use Copy graph SQL and run it in Workbench.", "dim"); }
   finally { btn.disabled = false; setTimeout(()=>{ bar.style.display="none"; fill.style.width="0"; }, 1200); }
