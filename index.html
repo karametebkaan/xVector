@@ -1418,7 +1418,8 @@ $("btnGraphSql").addEventListener("click", async () => {
 function graphSqlText(mode){
   const opts = graphOpts(); const th = parseFloat($("threshold").value);
   const parts = [];
-  const gd = graphDdl(opts), md = membershipDdl(opts);
+  const ddlOpts = (mode === "append" && opts.createMode === "replace") ? {...opts, createMode:"ifnot"} : opts;
+  const gd = graphDdl(ddlOpts), md = membershipDdl(ddlOpts);
   if (gd){ parts.push(gd.nodes, gd.edges); } if (md) parts.push(md);
   if (mode === "append"){
     parts.push(...nodeInserts(ENTITIES, {...opts, upsert:true}));
@@ -1462,6 +1463,8 @@ async function appendBatch(){
   const k = Math.max(1, parseInt($("knnK").value,10)||20);
   const beta = Math.max(0, parseFloat($("knnBeta").value)||0.35);
   const th = parseFloat($("threshold").value);
+  if ($("stampMode").value === "datetime")
+    log("Datestamp is 'datetime' — each append targets a new table set and won't merge with earlier batches. Use 'date' (or a fixed stamp) for incremental append.", "warn");
   const step = (n,tot) => fill.style.width = Math.round(100*n/tot)+"%";
   try {
     // 1. ensure table exists (with if-not-exists semantics for append mode) before max lookup
@@ -1475,13 +1478,17 @@ async function appendBatch(){
     // 3. insert embeddings (append)
     const ins = insertStatements();
     for (let i=0;i<ins.length;i++){ await ksql(ins[i]); step(i+1, ins.length+6); }
-    if ($("hnsw").checked) await ksql(hnswIndexSql(emb));
+    if ($("hnsw").checked){
+      try { await ksql(hnswIndexSql(emb)); }
+      catch(e){ log("HNSW index add skipped (likely already present): "+e.message, "dim"); }
+    }
     log("Inserted "+DOCS.length+" documents into "+emb+".", "ok");
     // 4. extract mentions from the new docs
     const docs = DOCS.map(x => ({id:x.id, text:x.text}));
     const mentions = $("extractProvider").value === "llm" ? await extractLLM(docs) : extractLocalMentions(docs);
     // 5. incremental identity resolution against the persisted node table
-    const gd = graphDdl(opts), md = membershipDdl(opts);
+    const ddlMode = opts.createMode === "replace" ? "ifnot" : opts.createMode;
+    const gd = graphDdl({...opts, createMode: ddlMode}), md = membershipDdl({...opts, createMode: ddlMode});
     if (gd){ await ksql(gd.nodes); await ksql(gd.edges); } if (md) await ksql(md);
     const keys = [...new Set(mentions.map(m => blockKey(m.surface, m.label)))];
     let existingNodes = [];
@@ -1536,7 +1543,7 @@ async function appendBatch(){
     LAST_TABLE = emb;
   } catch(e){
     log("Append failed: "+e.message, "err");
-    log("Batch is safe to retry (upserts converge). Or use Copy graph SQL / the editable box in Workbench.", "dim");
+    log("Node/edge upserts converge on retry, but embeddings and membership are plain inserts — a retry re-inserts these documents under new ids. Prefer fixing the cause, or use Copy graph SQL / the editable box.", "dim");
   } finally { btn.disabled = false; setTimeout(()=>{ bar.style.display="none"; fill.style.width="0"; }, 1200); }
 }
 

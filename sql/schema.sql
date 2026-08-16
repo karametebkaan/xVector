@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS graph_membership_<datestamp> (
 
 -- Insert form the app emits (ARRAY[...] literals):
 INSERT INTO graph_nodes_<datestamp> (node, label, doc_ids, doc_count, aliases, block_key, created_at) VALUES
-    ('Kaan Karamete', ARRAY['Person'], ARRAY[1,3], 3, ARRAY['K Karamete','Kaan Karamete'], 'kaan-karamete', '2026-08-16 10:30:00');
+    ('Kaan Karamete', ARRAY['Person'], ARRAY[1,3], 3, ARRAY['K Karamete','Kaan Karamete'], 'karamete', '2026-08-16 10:30:00');
 INSERT INTO graph_edges_<datestamp> (node1, node2, label, weight, sum_wv, sum_w, created_at) VALUES
     ('Acme Corp', 'Kaan Karamete', ARRAY['person-business'], 0.732000, 0.732000, 1.0, '2026-08-16 10:30:00');
 INSERT INTO graph_membership_<datestamp> (node, doc_id, label) VALUES
