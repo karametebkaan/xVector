@@ -16,6 +16,8 @@ with `--kinetica http://host:9191`.
 Opening `index.html` directly from disk also works, but then the app calls Kinetica from
 the browser and the instance has to allow the origin.
 
+For local embeddings and extraction via Ollama (models to pull, proxy flag), see `SETUP.md`.
+
 ## Use
 
 ### First run (Recreate mode)
