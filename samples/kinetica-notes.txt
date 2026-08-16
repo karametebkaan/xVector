@@ -7,3 +7,9 @@ HNSW indexes update automatically as rows change, while CAGRA indexes need a man
 The espresso machine needs descaling every two months. Hard water shortens the interval, and the group head gasket should be replaced once a year.
 
 Sourdough starter doubles in about six hours at room temperature. Feed it equal weights of flour and water, and discard half before each feed.
+
+Dr Kaan Karamete leads the graph analytics team at Acme Corp, where his group ships the vector search features the company sells to its largest customers.
+
+Earlier, K Karamete taught at the University of Texas before Acme Inc recruited the entire lab. Acme Corp still funds two graduate fellowships at the university.
+
+The University of Texas and Acme Corp announced a joint institute this spring; Kaan Karamete will direct it, splitting his week between the campus and the company.

@@ -54,3 +54,39 @@ ORDER BY distance;
 SELECT COUNT(*) AS rows, MIN(created_at) AS first_write FROM vector_embeddings_<datestamp>;
 SELECT doc_id, SIZE(embedding) AS dims, L2_NORM(embedding) AS magnitude
 FROM vector_embeddings_<datestamp>;
+
+
+-- ---- Entity graph (see Entities → Graph in index.html) --------------------
+-- Node identity is the canonical entity NAME (CHAR(64)); edges reference it.
+CREATE TABLE IF NOT EXISTS graph_nodes_<datestamp> (
+    node      CHAR(64)  NOT NULL,   -- NODE  (grammar): canonical entity name
+    label     VARCHAR[] NOT NULL,   -- LABEL: ARRAY['Person'] | ARRAY['Business']
+    doc_ids   INT[]     NOT NULL,   -- documents the entity is stated in (post-join key)
+    doc_count INT,
+    aliases   VARCHAR[],            -- merged surface variants
+    created_at TIMESTAMP NOT NULL
+);
+CREATE TABLE IF NOT EXISTS graph_edges_<datestamp> (
+    node1  CHAR(64)  NOT NULL,      -- NODE1
+    node2  CHAR(64)  NOT NULL,      -- NODE2
+    label  VARCHAR[] NOT NULL,      -- LABEL: ARRAY['person-business']
+    weight FLOAT     NOT NULL,      -- IDW strength (0,1]
+    created_at TIMESTAMP NOT NULL
+);
+
+-- Insert form the app emits (ARRAY[...] literals):
+INSERT INTO graph_nodes_<datestamp> (node, label, doc_ids, doc_count, aliases, created_at) VALUES
+    ('Kaan Karamete', ARRAY['Person'], ARRAY[1,3], 3, ARRAY['K Karamete','Kaan Karamete'], '2026-08-16 10:30:00');
+INSERT INTO graph_edges_<datestamp> (node1, node2, label, weight, created_at) VALUES
+    ('Acme Corp', 'Kaan Karamete', ARRAY['person-business'], 0.732000, '2026-08-16 10:30:00');
+
+-- Promote to a native graph (strength → cost for solvers):
+-- CREATE UNDIRECTED GRAPH entity_graph_<datestamp> (
+--   NODES => INPUT_TABLES((SELECT * FROM graph_nodes_<datestamp>)),
+--   EDGES => INPUT_TABLES((SELECT node1, node2, label,
+--                          (1 - weight) AS WEIGHT_VALUESPECIFIED FROM graph_edges_<datestamp>)));
+
+-- Post-join graph nodes back to the embeddings/documents:
+SELECT n.node, e.doc_id, e.content
+FROM graph_nodes_<datestamp> n
+JOIN vector_embeddings_<datestamp> e ON ARRAY_CONTAINS(n.doc_ids, e.doc_id);
