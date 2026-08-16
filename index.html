@@ -634,6 +634,69 @@ function extractLocalMentions(docs){
 }
 /* CORE:END */
 
+/* CORE:BEGIN */
+const BIZ_SUFFIX = new Set(["inc","llc","ltd","corp","corporation","co","company","gmbh","plc","lp","llp"]);
+
+function normalizeName(name){
+  return String(name).trim().replace(/\s+/g," ").replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu,"")
+    .replace(/'s$/i,"").replace(/[.,]/g,"").toLowerCase();
+}
+function givenCompatible(a, b){
+  a = a.toLowerCase().replace(/\.$/,""); b = b.toLowerCase().replace(/\.$/,"");
+  if (a === b) return true;
+  if (a.length === 1) return b[0] === a;
+  if (b.length === 1) return a[0] === b;
+  return false;
+}
+function personName(surface){
+  const t = surface.split(/\s+/);
+  return { given: t.slice(0,-1), sur: (t[t.length-1]||"").toLowerCase() };
+}
+function businessCore(surface){
+  const t = surface.toLowerCase().replace(/[.,]/g,"").split(/\s+/).filter(w => !BIZ_SUFFIX.has(w));
+  return t.join(" ");
+}
+function longest(surfaces){
+  return surfaces.slice().sort((x,y) => y.split(/\s+/).length - x.split(/\s+/).length || y.length - x.length)[0];
+}
+function mergeMentions(mentions, mode){
+  // group into buckets of arrays of mentions
+  const buckets = [];
+  const put = (m, matches) => {
+    for (const b of buckets){ if (b.label === m.label && matches(b)) { b.items.push(m); return; } }
+    buckets.push({ label: m.label, items: [m] });
+  };
+  for (const m of mentions){
+    if (mode === "none"){
+      const key = normalizeName(m.surface);
+      const hit = buckets.find(b => b.label === m.label && b.key === key);
+      if (hit) hit.items.push(m);
+      else buckets.push({ label: m.label, key, items: [m] });
+      continue;
+    }
+    if (m.label === "Person"){
+      const pn = personName(m.surface);
+      put(m, b => {
+        const bn = personName(b.items[0].surface);
+        if (bn.sur !== pn.sur) return false;
+        const n = Math.min(bn.given.length, pn.given.length);
+        for (let i=0;i<n;i++) if (!givenCompatible(bn.given[i], pn.given[i])) return false;
+        return true;
+      });
+    } else {
+      const core2 = businessCore(m.surface);
+      put(m, b => businessCore(b.items[0].surface) === core2);
+    }
+  }
+  return buckets.map(b => {
+    const surfaces = b.items.map(x => x.surface);
+    const docIds = [...new Set(b.items.map(x => x.docId))].sort((a,c)=>a-c);
+    const aliases = [...new Set(surfaces)].sort();
+    return { name: longest(surfaces), label: b.label, docIds, count: b.items.length, aliases };
+  });
+}
+/* CORE:END */
+
 function vecLiteral(v){
   const p = [];
   for (let i=0;i<v.length;i++) p.push(num(v[i]));

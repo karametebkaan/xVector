@@ -55,3 +55,48 @@ test("extractLocalMentions accepts title-preceded single surname as person", () 
   const m = core.extractLocalMentions([{id:4, text:"President Obama spoke."}]);
   assertNonStrict.deepEqual(m, [{surface:"Obama", label:"Person", docId:4}]);
 });
+
+test("normalizeName strips punctuation, case, possessive", () => {
+  assert.equal(core.normalizeName("  O'Brien's "), "o'brien");
+  assert.equal(core.normalizeName("Acme, Inc."), "acme inc");
+});
+
+test("givenCompatible handles initials and equality", () => {
+  assert.equal(core.givenCompatible("Kaan","K"), true);
+  assert.equal(core.givenCompatible("K","Kaan"), true);
+  assert.equal(core.givenCompatible("Jane","John"), false);
+});
+
+test("mergeMentions none keeps variants distinct", () => {
+  const e = core.mergeMentions([
+    {surface:"Kaan Karamete",label:"Person",docId:1},
+    {surface:"K Karamete",label:"Person",docId:2},
+  ], "none");
+  assert.equal(e.length, 2);
+});
+
+test("mergeMentions heuristic merges person variants", () => {
+  const e = core.mergeMentions([
+    {surface:"Kaan Karamete",label:"Person",docId:1},
+    {surface:"K Karamete",label:"Person",docId:2},
+    {surface:"Kaan Karamete",label:"Person",docId:2},
+  ], "heuristic");
+  assert.equal(e.length, 1);
+  assert.equal(e[0].name, "Kaan Karamete");
+  assertNonStrict.deepEqual(e[0].docIds, [1,2]);
+  assertNonStrict.deepEqual(e[0].aliases, ["K Karamete","Kaan Karamete"]);
+  assert.equal(e[0].count, 3);
+});
+
+test("mergeMentions heuristic merges business by core, not different people", () => {
+  const biz = core.mergeMentions([
+    {surface:"Acme Corp",label:"Business",docId:1},
+    {surface:"Acme Inc",label:"Business",docId:2},
+  ], "heuristic");
+  assert.equal(biz.length, 1);
+  const ppl = core.mergeMentions([
+    {surface:"Jane Smith",label:"Person",docId:1},
+    {surface:"John Smith",label:"Person",docId:2},
+  ], "heuristic");
+  assert.equal(ppl.length, 2);
+});
