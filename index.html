@@ -578,7 +578,7 @@ function render(){
 
 /* ---------------- SQL ---------------- */
 /* CORE:BEGIN */
-function esc(s){ return String(s).replace(/'/g, "''").replace(/ /g,""); }
+function esc(s){ return String(s).replace(/'/g, "''").replace(/\u0000/g,""); }
 function num(x){ return String(Number(x.toFixed(6))); }
 /* CORE:END */
 function vecLiteral(v){

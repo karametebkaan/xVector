@@ -17,9 +17,11 @@ export function loadCore(){
 
 const core = loadCore();
 
-test("esc doubles single quotes and strips NULs", () => {
+test("esc doubles single quotes, strips NUL, preserves spaces", () => {
+  const NUL = String.fromCharCode(0);
   assert.equal(core.esc("O'Brien"), "O''Brien");
-  assert.equal(core.esc("a b"), "ab");
+  assert.equal(core.esc("Kaan Karamete"), "Kaan Karamete");
+  assert.equal(core.esc("a" + NUL + "b"), "ab");
 });
 
 test("num formats to <=6 decimals", () => {
