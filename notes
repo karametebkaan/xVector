@@ -1,0 +1,7 @@
+  - Ad-hoc heuristic (default) — deterministic lexical: PERSON = surname match + given-name compatibility (full vs initial / superset); BUSINESS = strip legal suffixes, match
+  core. Canonical = longest form, variants kept as aliases.
+  - None (exact match) — case/punctuation-normalized exact only; no merging.
+  - External API — POST the extracted entity list to a configurable resolution endpoint that returns canonical groupings; request/response shape and UI wired now, endpoint
+  pluggable later, parsed defensively like ksql.
+
+  Ev

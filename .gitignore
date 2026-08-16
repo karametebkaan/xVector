@@ -1,0 +1,5 @@
+.DS_Store
+*.sql.out
+*.json.out
+__pycache__/
+.superpowers/

@@ -1,0 +1,9 @@
+Kinetica stores embeddings natively with the VECTOR type, so similarity search runs inside the same engine that handles joins, filters and time windows. There is no second store to keep in sync.
+
+A vector column can be declared with NORMALIZE, which gives every inserted vector an L2 magnitude of one. That makes cosine comparisons cheaper and keeps distances consistent across batches.
+
+HNSW indexes update automatically as rows change, while CAGRA indexes need a manual refresh. Pick HNSW when the table is written continuously.
+
+The espresso machine needs descaling every two months. Hard water shortens the interval, and the group head gasket should be replaced once a year.
+
+Sourdough starter doubles in about six hours at room temperature. Feed it equal weights of flour and water, and discard half before each feed.

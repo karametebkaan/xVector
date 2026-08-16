@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Paragraph → Vector · Kinetica</title>
+<style>
+  :root{
+    --canvas:#EAE9F0;
+    --panel:#FDFCFF;
+    --ink:#16172B;
+    --muted:#6A6B85;
+    --line:#D3D2E2;
+    --signal:#4B2ED6;
+    --signal-soft:#EDE9FD;
+    --warm:#C97A19;
+    --good:#1F8A6D;
+    --bad:#C4304A;
+    --mono: ui-monospace, SFMono-Regular, Menlo, "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+    --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--canvas);
+    color:var(--ink);
+    font-family:var(--sans);
+    font-size:14px;
+    line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 20px 64px}
+
+  /* ---------- header ---------- */
+  header{
+    display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;justify-content:space-between;
+    padding-bottom:16px;margin-bottom:22px;border-bottom:2px solid var(--ink);
+  }
+  h1{
+    font-family:var(--mono);font-size:15px;font-weight:600;letter-spacing:.22em;
+    text-transform:uppercase;margin:0;
+  }
+  .sub{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:4px}
+  .target{
+    font-family:var(--mono);font-size:12px;text-align:right;color:var(--muted);
+  }
+  .target b{display:block;font-size:14px;color:var(--signal);font-weight:600;letter-spacing:.02em}
+
+  /* ---------- layout ---------- */
+  .cols{display:grid;grid-template-columns:1.15fr .85fr;gap:20px;align-items:start}
+  @media (max-width:900px){ .cols{grid-template-columns:1fr} }
+
+  .panel{
+    background:var(--panel);border:1px solid var(--line);border-radius:3px;
+    padding:16px 16px 18px;margin-bottom:20px;
+  }
+  .panel > h2{
+    font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;
+    color:var(--muted);margin:0 0 12px;font-weight:600;
+    display:flex;align-items:center;gap:8px;
+  }
+  .panel > h2::after{content:"";flex:1;height:1px;background:var(--line)}
+
+  label{display:block;font-family:var(--mono);font-size:11px;letter-spacing:.08em;
+    text-transform:uppercase;color:var(--muted);margin:0 0 5px}
+  input[type=text],input[type=password],input[type=number],select,textarea{
+    width:100%;font-family:var(--mono);font-size:13px;color:var(--ink);
+    background:#fff;border:1px solid var(--line);border-radius:2px;padding:8px 9px;
+  }
+  input:focus,select:focus,textarea:focus{outline:2px solid var(--signal);outline-offset:0;border-color:var(--signal)}
+  textarea{resize:vertical;line-height:1.6}
+  .row{display:flex;gap:10px;flex-wrap:wrap}
+  .row > *{flex:1;min-width:120px}
+  .field{margin-bottom:12px}
+  .check{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:12px;
+    color:var(--ink);text-transform:none;letter-spacing:0;margin:0 0 8px}
+  .check input{width:auto;margin:0;accent-color:var(--signal)}
+
+  button{
+    font-family:var(--mono);font-size:12px;letter-spacing:.06em;
+    padding:9px 14px;border-radius:2px;border:1px solid var(--ink);
+    background:var(--ink);color:#fff;cursor:pointer;
+  }
+  button:hover{background:#2b2d4d}
+  button.ghost{background:transparent;color:var(--ink);border-color:var(--line)}
+  button.ghost:hover{background:#F2F1F9;border-color:var(--ink)}
+  button.go{background:var(--signal);border-color:var(--signal)}
+  button.go:hover{background:#3d23b8}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  button:focus-visible{outline:2px solid var(--warm);outline-offset:2px}
+  .btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+
+  .hint{font-size:12px;color:var(--muted);margin:8px 0 0}
+  code{font-family:var(--mono);background:#F1F0F8;padding:1px 4px;border-radius:2px;font-size:12px}
+
+  details{border-top:1px solid var(--line);margin-top:14px;padding-top:10px}
+  details summary{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--muted);cursor:pointer}
+  details p{font-size:12px;color:var(--muted)}
+
+  /* ---------- results ---------- */
+  .doc{border-top:1px solid var(--line);padding:12px 0}
+  .doc:first-child{border-top:none}
+  .doc-head{display:flex;gap:10px;align-items:baseline;justify-content:space-between}
+  .doc-id{font-family:var(--mono);font-size:11px;color:var(--signal);font-weight:600}
+  .doc-meta{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap}
+  .doc-text{margin:4px 0 8px;font-size:13px;color:var(--ink);
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  /* signature: 64-cell magnitude strip, one cell per dimension */
+  .strip{display:grid;grid-template-columns:repeat(64,1fr);gap:1px;height:26px;
+    background:var(--line);padding:1px;border-radius:1px;cursor:pointer}
+  .cell{background:#fff}
+  .doc-vec{display:none;font-family:var(--mono);font-size:11px;color:var(--muted);
+    margin-top:8px;word-break:break-all;line-height:1.7}
+  .doc.open .doc-vec{display:block}
+  .doc.open .doc-text{-webkit-line-clamp:unset}
+  .legend{font-family:var(--mono);font-size:10px;color:var(--muted);letter-spacing:.08em;
+    display:flex;gap:14px;margin-bottom:10px;text-transform:uppercase}
+  .swatch{display:inline-block;width:9px;height:9px;margin-right:4px;vertical-align:-1px}
+
+  /* ---------- console ---------- */
+  #log{
+    background:var(--ink);color:#C9C8E0;font-family:var(--mono);font-size:12px;
+    border-radius:3px;padding:12px 14px;height:190px;overflow:auto;white-space:pre-wrap;
+    line-height:1.65;
+  }
+  #log .ok{color:#7FE3C0}
+  #log .err{color:#FF9BA8}
+  #log .warn{color:#F3C77B}
+  #log .dim{color:#7C7B9C}
+
+  table.res{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px;margin-top:10px}
+  table.res th{text-align:left;border-bottom:1px solid var(--ink);padding:6px 8px;
+    font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+  table.res td{border-bottom:1px solid var(--line);padding:6px 8px;vertical-align:top}
+  table.res td.num{color:var(--signal);white-space:nowrap}
+
+  .bar{height:3px;background:var(--line);border-radius:2px;overflow:hidden;margin-top:10px;display:none}
+  .bar span{display:block;height:100%;width:0;background:var(--signal);transition:width .15s linear}
+  .empty{font-family:var(--mono);font-size:12px;color:var(--muted);padding:10px 0}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div>
+    <h1>Paragraph → Vector</h1>
+    <div class="sub">64-dim embeddings, written straight into Kinetica</div>
+  </div>
+  <div class="target">
+    writing to
+    <b id="tableLabel">vector_embeddings_00000000</b>
+  </div>
+</header>
+
+<div class="cols">
+
+  <!-- ============ LEFT ============ -->
+  <div>
+    <div class="panel">
+      <h2>Text</h2>
+      <textarea id="input" rows="14" placeholder="Paste your paragraphs here.
+
+Separate each one with a blank line by default — every paragraph becomes one row and one 64-dimension vector."></textarea>
+      <div class="row" style="margin-top:12px">
+        <div>
+          <label for="splitMode">Split on</label>
+          <select id="splitMode">
+            <option value="blank">Blank line</option>
+            <option value="line">Every line</option>
+            <option value="custom">Custom delimiter</option>
+            <option value="none">Nothing — one single document</option>
+          </select>
+        </div>
+        <div>
+          <label for="delim">Custom delimiter</label>
+          <input type="text" id="delim" value="---" />
+        </div>
+        <div style="max-width:130px">
+          <label for="minChars">Min characters</label>
+          <input type="number" id="minChars" value="1" min="0" />
+        </div>
+      </div>
+      <div class="btns" style="margin-top:12px">
+        <button class="go" id="btnEmbed">Generate embeddings</button>
+        <button class="ghost" id="btnSample">Load sample text</button>
+        <button class="ghost" id="btnClear">Clear</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Vectors <span id="vecCount" style="font-weight:400;letter-spacing:0;text-transform:none"></span></h2>
+      <div class="legend">
+        <span><i class="swatch" style="background:var(--signal)"></i>positive</span>
+        <span><i class="swatch" style="background:var(--warm)"></i>negative</span>
+        <span class="dim">click a strip for the raw vector</span>
+      </div>
+      <div id="docs"><div class="empty">Nothing embedded yet.</div></div>
+      <div class="btns" style="margin-top:14px">
+        <button class="ghost" id="btnSql">Copy SQL</button>
+        <button class="ghost" id="btnSqlFile">Download .sql</button>
+        <button class="ghost" id="btnJson">Download .json</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ RIGHT ============ -->
+  <div>
+    <div class="panel">
+      <h2>Embedding source</h2>
+      <div class="field">
+        <label for="provider">Provider</label>
+        <select id="provider">
+          <option value="local">Built in — deterministic, offline</option>
+          <option value="api">HTTP API — OpenAI-compatible /v1/embeddings</option>
+        </select>
+      </div>
+      <div id="localOpts">
+        <div class="check"><input type="checkbox" id="useBigrams" checked><label for="useBigrams" style="margin:0;text-transform:none;letter-spacing:0;font-size:12px">Include word pairs</label></div>
+        <div class="check"><input type="checkbox" id="useIdf" checked><label for="useIdf" style="margin:0;text-transform:none;letter-spacing:0;font-size:12px">Down-weight terms common to this batch</label></div>
+        <p class="hint">Random-projection hashing. Same text always gives the same vector, and similar text lands close by — good enough to build and test the pipeline without a model server.</p>
+      </div>
+      <div id="apiOpts" style="display:none">
+        <div class="field">
+          <label for="apiUrl">Endpoint</label>
+          <input type="text" id="apiUrl" value="http://localhost:11434/v1/embeddings" />
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="apiModel">Model</label>
+            <input type="text" id="apiModel" value="nomic-embed-text" />
+          </div>
+          <div class="field" style="max-width:120px">
+            <label for="apiBatch">Batch size</label>
+            <input type="number" id="apiBatch" value="16" min="1" />
+          </div>
+        </div>
+        <div class="field">
+          <label for="apiKey">API key — optional</label>
+          <input type="password" id="apiKey" placeholder="sk-…" />
+        </div>
+        <div class="field">
+          <label for="reduce">If the model returns more than 64 dims</label>
+          <select id="reduce">
+            <option value="ask">Ask for 64 in the request, then truncate</option>
+            <option value="truncate">Truncate to the first 64</option>
+            <option value="project">Project down to 64</option>
+          </select>
+        </div>
+        <p class="hint">Truncating suits Matryoshka models like <code>text-embedding-3-*</code>. For anything else, projecting preserves distances better.</p>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Kinetica</h2>
+      <div class="field">
+        <label for="kUrl">Instance URL</label>
+        <input type="text" id="kUrl" value="http://localhost:9191" />
+      </div>
+      <div class="row">
+        <div class="field">
+          <label for="kUser">User</label>
+          <input type="text" id="kUser" placeholder="admin" />
+        </div>
+        <div class="field">
+          <label for="kPass">Password</label>
+          <input type="password" id="kPass" />
+        </div>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label for="kSchema">Schema — optional</label>
+          <input type="text" id="kSchema" placeholder="ki_home" />
+        </div>
+        <div class="field">
+          <label for="kTable">Table</label>
+          <input type="text" id="kTable" />
+        </div>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label for="stampMode">Datestamp</label>
+          <select id="stampMode">
+            <option value="date">YYYYMMDD</option>
+            <option value="datetime">YYYYMMDD_HHMMSS</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="createMode">On write</label>
+          <select id="createMode">
+            <option value="ifnot">Create if missing, then append</option>
+            <option value="replace">Replace the table</option>
+            <option value="skip">Table already exists — insert only</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div class="field" style="max-width:140px">
+          <label for="batchSize">Rows per insert</label>
+          <input type="number" id="batchSize" value="50" min="1" />
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <div class="check"><input type="checkbox" id="normalize" checked><label for="normalize" style="margin:0;text-transform:none;letter-spacing:0;font-size:12px">NORMALIZE column</label></div>
+          <div class="check"><input type="checkbox" id="hnsw"><label for="hnsw" style="margin:0;text-transform:none;letter-spacing:0;font-size:12px">Add HNSW index</label></div>
+        </div>
+      </div>
+      <div class="btns">
+        <button class="go" id="btnStore">Store in Kinetica</button>
+        <button class="ghost" id="btnTest">Test connection</button>
+      </div>
+      <div class="bar" id="bar"><span></span></div>
+
+      <details>
+        <summary>If the browser can't reach it</summary>
+        <p>The browser calls <code>/execute/sql</code> directly, so Kinetica has to allow this page's origin. Two things trip it up: a page served over HTTPS can't call <code>http://localhost</code>, and a cross-origin request needs CORS enabled on the Kinetica HTTP endpoint. Save this file and open it from disk or from the same host as Kinetica, or skip the write and use <b>Copy SQL</b> in Workbench instead.</p>
+      </details>
+    </div>
+
+    <div class="panel">
+      <h2>Similarity check</h2>
+      <div class="field">
+        <input type="text" id="qText" placeholder="Search the table you just wrote" />
+      </div>
+      <div class="row">
+        <div class="field">
+          <label for="metric">Distance</label>
+          <select id="metric">
+            <option value="COSINE_DISTANCE">Cosine</option>
+            <option value="L2_DISTANCE">L2 / Euclidean</option>
+            <option value="L1_DISTANCE">L1 / taxicab</option>
+          </select>
+        </div>
+        <div class="field" style="max-width:100px">
+          <label for="topK">Results</label>
+          <input type="number" id="topK" value="5" min="1" max="50" />
+        </div>
+      </div>
+      <div class="btns"><button id="btnSearch">Search</button></div>
+      <div id="searchOut"></div>
+    </div>
+  </div>
+</div>
+
+<div class="panel" style="margin-top:0">
+  <h2>Console</h2>
+  <div id="log"></div>
+</div>
+
+</div>
+
+<script>
+"use strict";
+const DIM = 64;
+const $ = id => document.getElementById(id);
+let DOCS = [];           // {id, text, tokens, vec:Float64Array}
+let LAST_TABLE = "";     // fully qualified name of the last successful write
+
+/* ---------------- console ---------------- */
+function log(msg, cls){
+  const el = $("log");
+  const t = new Date().toTimeString().slice(0,8);
+  const line = document.createElement("div");
+  line.innerHTML = '<span class="dim">'+t+'</span>  <span class="'+(cls||"")+'"></span>';
+  line.lastChild.textContent = msg;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+/* ---------------- table naming ---------------- */
+function pad(n){ return String(n).padStart(2,"0"); }
+function stamp(){
+  const d = new Date();
+  const day = d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate());
+  return $("stampMode").value === "datetime"
+    ? day+"_"+pad(d.getHours())+pad(d.getMinutes())+pad(d.getSeconds())
+    : day;
+}
+function defaultTable(){ return "vector_embeddings_"+stamp(); }
+function fqName(){
+  const t = ($("kTable").value || "").trim() || defaultTable();
+  const s = ($("kSchema").value || "").trim();
+  return s ? s+"."+t : t;
+}
+function refreshLabel(){ $("tableLabel").textContent = fqName(); }
+
+/* ---------------- deterministic embedder ---------------- */
+function hashStr(s){
+  let h = 2166136261 >>> 0;
+  for (let i=0;i<s.length;i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+function mulberry32(a){
+  return function(){
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a>>>15), 1 | a);
+    t = (t + Math.imul(t ^ (t>>>7), 61 | t)) ^ t;
+    return ((t ^ (t>>>14)) >>> 0) / 4294967296;
+  };
+}
+const VCACHE = new Map();
+function tokenVector(tok){
+  let v = VCACHE.get(tok);
+  if (v) return v;
+  const rnd = mulberry32(hashStr(tok) ^ 0x9E3779B9);
+  v = new Float64Array(DIM);
+  for (let i=0;i<DIM;i+=2){
+    const u1 = Math.max(rnd(), 1e-12), u2 = rnd();
+    const r = Math.sqrt(-2*Math.log(u1));
+    v[i] = r*Math.cos(2*Math.PI*u2);
+    if (i+1 < DIM) v[i+1] = r*Math.sin(2*Math.PI*u2);
+  }
+  VCACHE.set(tok, v);
+  return v;
+}
+function tokenize(text){
+  const m = text.toLowerCase().match(/[\p{L}\p{N}_]+/gu);
+  return m || [];
+}
+function termCounts(text, bigrams){
+  const toks = tokenize(text);
+  const counts = new Map();
+  for (const t of toks) counts.set(t, (counts.get(t)||0)+1);
+  if (bigrams){
+    for (let i=0;i+1<toks.length;i++){
+      const b = toks[i]+"_"+toks[i+1];
+      counts.set(b, (counts.get(b)||0)+0.5);
+    }
+  }
+  return {counts, n: toks.length};
+}
+function l2norm(v){
+  let s = 0;
+  for (let i=0;i<v.length;i++) s += v[i]*v[i];
+  s = Math.sqrt(s);
+  if (s > 0) for (let i=0;i<v.length;i++) v[i] /= s;
+  return v;
+}
+function embedLocal(texts){
+  const bigrams = $("useBigrams").checked;
+  const useIdf  = $("useIdf").checked && texts.length >= 3;
+  const per = texts.map(t => termCounts(t, bigrams));
+  const df = new Map();
+  if (useIdf){
+    for (const p of per) for (const term of p.counts.keys()) df.set(term, (df.get(term)||0)+1);
+  }
+  const N = texts.length;
+  return per.map(p => {
+    const v = new Float64Array(DIM);
+    for (const [term, tf] of p.counts){
+      let w = 1 + Math.log(1 + tf);
+      if (useIdf) w *= Math.log(1 + N/(df.get(term)||1));
+      const tv = tokenVector(term);
+      for (let i=0;i<DIM;i++) v[i] += w*tv[i];
+    }
+    return { vec: l2norm(v), tokens: p.n };
+  });
+}
+
+/* ---------------- remote embedder ---------------- */
+let PROJ = null, PROJ_SRC = 0;
+function projection(src){
+  if (PROJ && PROJ_SRC === src) return PROJ;
+  const rnd = mulberry32(0x5EED ^ src);
+  PROJ = new Float64Array(src*DIM);
+  for (let i=0;i<PROJ.length;i+=2){
+    const u1 = Math.max(rnd(),1e-12), u2 = rnd();
+    const r = Math.sqrt(-2*Math.log(u1));
+    PROJ[i] = r*Math.cos(2*Math.PI*u2);
+    if (i+1 < PROJ.length) PROJ[i+1] = r*Math.sin(2*Math.PI*u2);
+  }
+  PROJ_SRC = src;
+  return PROJ;
+}
+function reduceVec(arr){
+  const mode = $("reduce").value;
+  if (arr.length === DIM) return l2norm(Float64Array.from(arr));
+  if (mode === "project"){
+    const P = projection(arr.length);
+    const out = new Float64Array(DIM);
+    for (let i=0;i<arr.length;i++){
+      const base = i*DIM, a = arr[i];
+      for (let j=0;j<DIM;j++) out[j] += a*P[base+j];
+    }
+    return l2norm(out);
+  }
+  return l2norm(Float64Array.from(arr.slice(0, DIM)));
+}
+async function embedRemote(texts){
+  const url   = $("apiUrl").value.trim();
+  const model = $("apiModel").value.trim();
+  const key   = $("apiKey").value.trim();
+  const size  = Math.max(1, parseInt($("apiBatch").value,10) || 16);
+  const askDim = $("reduce").value === "ask";
+  const out = [];
+  for (let i=0;i<texts.length;i+=size){
+    const chunk = texts.slice(i, i+size);
+    const body = { model, input: chunk };
+    if (askDim) body.dimensions = DIM;
+    const headers = {"Content-Type":"application/json"};
+    if (key) headers["Authorization"] = "Bearer "+key;
+    log("embedding "+(i+1)+"–"+(i+chunk.length)+" of "+texts.length+" via "+model);
+    const res = await fetch(url, {method:"POST", headers, body: JSON.stringify(body)});
+    const txt = await res.text();
+    if (!res.ok) throw new Error("Embedding API returned "+res.status+": "+txt.slice(0,300));
+    let json;
+    try { json = JSON.parse(txt); } catch(e){ throw new Error("Embedding API sent back something that isn't JSON: "+txt.slice(0,200)); }
+    const rows = json.data || json.embeddings || [];
+    if (rows.length !== chunk.length) throw new Error("Asked for "+chunk.length+" vectors, got "+rows.length);
+    for (let k=0;k<rows.length;k++){
+      const arr = rows[k].embedding || rows[k];
+      if (!Array.isArray(arr)) throw new Error("Couldn't find an embedding array in the response");
+      out.push({ vec: reduceVec(arr), tokens: tokenize(chunk[k]).length, srcDim: arr.length });
+    }
+  }
+  return out;
+}
+
+/* ---------------- splitting ---------------- */
+function splitText(){
+  const raw = $("input").value;
+  const mode = $("splitMode").value;
+  const min = parseInt($("minChars").value,10) || 0;
+  let parts;
+  if (mode === "blank")      parts = raw.split(/\n\s*\n+/);
+  else if (mode === "line")  parts = raw.split(/\n+/);
+  else if (mode === "none")  parts = [raw];
+  else {
+    const d = $("delim").value || "---";
+    parts = raw.split(d);
+  }
+  return parts.map(p => p.trim().replace(/[ \t]+/g," ")).filter(p => p.length >= Math.max(1,min));
+}
+
+/* ---------------- rendering ---------------- */
+function cellColor(x, max){
+  const mag = Math.min(1, Math.abs(x)/(max||1));
+  const a = (0.12 + 0.88*mag).toFixed(3);
+  return x >= 0 ? "rgba(75,46,214,"+a+")" : "rgba(201,122,25,"+a+")";
+}
+function render(){
+  const host = $("docs");
+  host.innerHTML = "";
+  $("vecCount").textContent = DOCS.length ? "— "+DOCS.length+" × "+DIM+"d" : "";
+  if (!DOCS.length){ host.innerHTML = '<div class="empty">Nothing embedded yet.</div>'; return; }
+  for (const d of DOCS){
+    let max = 0;
+    for (let i=0;i<DIM;i++) max = Math.max(max, Math.abs(d.vec[i]));
+    const el = document.createElement("div");
+    el.className = "doc";
+    const head = document.createElement("div");
+    head.className = "doc-head";
+    head.innerHTML = '<span class="doc-id">#'+d.id+'</span>'+
+      '<span class="doc-meta">'+d.tokens+' tokens · '+d.text.length+' chars</span>';
+    const txt = document.createElement("div");
+    txt.className = "doc-text";
+    txt.textContent = d.text;
+    const strip = document.createElement("div");
+    strip.className = "strip";
+    strip.title = "dimension 1–64";
+    for (let i=0;i<DIM;i++){
+      const c = document.createElement("div");
+      c.className = "cell";
+      c.style.background = cellColor(d.vec[i], max);
+      c.title = "dim "+(i+1)+" = "+d.vec[i].toFixed(5);
+      strip.appendChild(c);
+    }
+    const vec = document.createElement("div");
+    vec.className = "doc-vec";
+    vec.textContent = vecLiteral(d.vec);
+    strip.addEventListener("click", () => el.classList.toggle("open"));
+    el.append(head, txt, strip, vec);
+    host.appendChild(el);
+  }
+}
+
+/* ---------------- SQL ---------------- */
+function esc(s){ return String(s).replace(/'/g, "''").replace(/\u0000/g,""); }
+function num(x){ return String(Number(x.toFixed(6))); }
+function vecLiteral(v){
+  const p = [];
+  for (let i=0;i<v.length;i++) p.push(num(v[i]));
+  return "["+p.join(",")+"]";
+}
+function nowLiteral(){
+  const d = new Date();
+  return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())+" "+
+         pad(d.getHours())+":"+pad(d.getMinutes())+":"+pad(d.getSeconds());
+}
+function ddl(){
+  const t = fqName();
+  const mode = $("createMode").value;
+  if (mode === "skip") return null;
+  const head = mode === "replace" ? "CREATE OR REPLACE TABLE "+t : "CREATE TABLE IF NOT EXISTS "+t;
+  const norm = $("normalize").checked ? DIM+", NORMALIZE" : String(DIM);
+  return head+"\n(\n"+
+    "    doc_id INT NOT NULL,\n"+
+    "    content VARCHAR NOT NULL,\n"+
+    "    token_count INT,\n"+
+    "    char_count INT,\n"+
+    "    embed_source VARCHAR(64),\n"+
+    "    created_at TIMESTAMP NOT NULL,\n"+
+    "    embedding VECTOR("+norm+") NOT NULL\n"+
+    ")";
+}
+function insertStatements(){
+  const t = fqName();
+  const size = Math.max(1, parseInt($("batchSize").value,10) || 50);
+  const src = $("provider").value === "local" ? "local-hash-64" : ($("apiModel").value.trim()||"api").slice(0,64);
+  const ts = nowLiteral();
+  const cols = "(doc_id, content, token_count, char_count, embed_source, created_at, embedding)";
+  const out = [];
+  for (let i=0;i<DOCS.length;i+=size){
+    const rows = DOCS.slice(i, i+size).map(d =>
+      "    ("+d.id+", '"+esc(d.text)+"', "+d.tokens+", "+d.text.length+", '"+esc(src)+"', '"+ts+"', '"+vecLiteral(d.vec)+"')"
+    );
+    out.push("INSERT INTO "+t+"\n"+cols+"\nVALUES\n"+rows.join(",\n"));
+  }
+  return out;
+}
+function fullScript(){
+  const parts = [];
+  const d = ddl();
+  if (d) parts.push(d);
+  parts.push(...insertStatements());
+  if ($("hnsw").checked) parts.push("ALTER TABLE "+fqName()+" ADD HNSW INDEX (embedding)");
+  return parts.join(";\n\n")+";\n";
+}
+
+/* ---------------- Kinetica transport ---------------- */
+async function ksql(statement, limit){
+  const base = $("kUrl").value.trim().replace(/\/+$/,"");
+  if (!base) throw new Error("Set the Kinetica instance URL first");
+  const headers = {"Content-Type":"application/json"};
+  const u = $("kUser").value, p = $("kPass").value;
+  if (u) headers["Authorization"] = "Basic "+btoa(u+":"+p);
+  const res = await fetch(base+"/execute/sql", {
+    method:"POST",
+    headers,
+    body: JSON.stringify({
+      statement: statement,
+      offset: 0,
+      limit: (limit === undefined ? -9999 : limit),
+      encoding: "json",
+      request_schema_str: "",
+      data: [],
+      options: {}
+    })
+  });
+  const text = await res.text();
+  let outer;
+  try { outer = JSON.parse(text); }
+  catch(e){ throw new Error("HTTP "+res.status+" — response wasn't JSON: "+text.slice(0,240)); }
+  if (outer.status === "ERROR") throw new Error(outer.message || "Kinetica reported an error");
+  let payload = outer;
+  if (typeof outer.data_str === "string"){
+    try { payload = JSON.parse(outer.data_str); } catch(e){}
+  }
+  let records = null;
+  if (payload && typeof payload.json_encoded_response === "string"){
+    try { records = JSON.parse(payload.json_encoded_response); } catch(e){}
+  }
+  return { payload, records };
+}
+function recordsToRows(records){
+  if (!records) return null;
+  const headers = records.column_headers || Object.keys(records).filter(k => /^column_\d+$/.test(k));
+  const cols = [];
+  let i = 1;
+  while (records["column_"+i]) { cols.push(records["column_"+i]); i++; }
+  if (!cols.length) return null;
+  const n = cols[0].length;
+  const rows = [];
+  for (let r=0;r<n;r++) rows.push(cols.map(c => c[r]));
+  return { headers, rows };
+}
+
+/* ---------------- actions ---------------- */
+$("btnEmbed").addEventListener("click", async () => {
+  const texts = splitText();
+  if (!texts.length){ log("No paragraphs found — check the split setting.", "warn"); return; }
+  const btn = $("btnEmbed");
+  btn.disabled = true; btn.textContent = "Generating…";
+  try {
+    const t0 = performance.now();
+    const res = $("provider").value === "local" ? embedLocal(texts) : await embedRemote(texts);
+    DOCS = texts.map((t,i) => ({ id:i+1, text:t, tokens:res[i].tokens, vec:res[i].vec }));
+    render();
+    const ms = Math.round(performance.now()-t0);
+    let note = "";
+    if (res[0] && res[0].srcDim && res[0].srcDim !== DIM) note = " (reduced from "+res[0].srcDim+"d)";
+    log("Embedded "+DOCS.length+" paragraphs into "+DIM+" dimensions in "+ms+" ms"+note+".", "ok");
+  } catch(e){
+    log(e.message, "err");
+  } finally {
+    btn.disabled = false; btn.textContent = "Generate embeddings";
+  }
+});
+
+$("btnTest").addEventListener("click", async () => {
+  try {
+    await ksql("SELECT 1 AS ping", 1);
+    log("Connected to "+$("kUrl").value.trim()+".", "ok");
+  } catch(e){
+    log("Connection failed: "+e.message, "err");
+  }
+});
+
+$("btnStore").addEventListener("click", async () => {
+  if (!DOCS.length){ log("Generate embeddings first.", "warn"); return; }
+  const btn = $("btnStore"); btn.disabled = true;
+  const bar = $("bar"); bar.style.display = "block";
+  const fill = bar.querySelector("span");
+  const table = fqName();
+  try {
+    const d = ddl();
+    if (d){
+      await ksql(d);
+      log(($("createMode").value === "replace" ? "Replaced " : "Table ready: ")+table, "ok");
+    }
+    const stmts = insertStatements();
+    let done = 0;
+    for (let i=0;i<stmts.length;i++){
+      const r = await ksql(stmts[i]);
+      const n = (r.payload && r.payload.count_affected != null) ? r.payload.count_affected : "?";
+      done += Math.max(1, parseInt($("batchSize").value,10)||50);
+      fill.style.width = Math.min(100, Math.round(100*(i+1)/stmts.length))+"%";
+      log("Batch "+(i+1)+"/"+stmts.length+" inserted"+(n!=="?" ? " ("+n+" rows)" : "")+".");
+    }
+    if ($("hnsw").checked){
+      await ksql("ALTER TABLE "+table+" ADD HNSW INDEX (embedding)");
+      log("HNSW index added on embedding.", "ok");
+    }
+    LAST_TABLE = table;
+    log("Stored "+DOCS.length+" vectors in "+table+".", "ok");
+  } catch(e){
+    log("Write failed: "+e.message, "err");
+    log("The SQL is still valid — use Copy SQL and run it in Workbench.", "dim");
+  } finally {
+    btn.disabled = false;
+    setTimeout(() => { bar.style.display = "none"; fill.style.width = "0"; }, 1200);
+  }
+});
+
+$("btnSearch").addEventListener("click", async () => {
+  const q = $("qText").value.trim();
+  const out = $("searchOut");
+  out.innerHTML = "";
+  if (!q){ log("Type something to search for.", "warn"); return; }
+  try {
+    const r = $("provider").value === "local" ? embedLocal([q]) : await embedRemote([q]);
+    const lit = vecLiteral(r[0].vec);
+    const t = LAST_TABLE || fqName();
+    const k = Math.max(1, parseInt($("topK").value,10) || 5);
+    const fn = $("metric").value;
+    const sql = "SELECT TOP "+k+" doc_id, content, "+fn+"(embedding, '"+lit+"') AS distance\nFROM "+t+"\nORDER BY distance";
+    const res = await ksql(sql, k);
+    const table = recordsToRows(res.records);
+    if (!table){ out.innerHTML = '<div class="empty">No rows came back.</div>'; log("Query ran but returned no rows.", "warn"); return; }
+    const el = document.createElement("table");
+    el.className = "res";
+    const hr = el.insertRow();
+    for (const h of table.headers){
+      const th = document.createElement("th");
+      th.textContent = h;
+      hr.appendChild(th);
+    }
+    for (const row of table.rows){
+      const tr = el.insertRow();
+      for (const c of row){
+        const td = tr.insertCell();
+        const isNum = typeof c === "number";
+        if (isNum) td.className = "num";
+        const v = isNum ? c.toFixed(5) : String(c);
+        td.textContent = v.length > 180 ? v.slice(0,180)+"…" : v;
+      }
+    }
+    out.appendChild(el);
+    log("Search returned "+table.rows.length+" rows from "+t+".", "ok");
+  } catch(e){
+    log("Search failed: "+e.message, "err");
+  }
+});
+
+/* ---------------- exports ---------------- */
+function download(name, text, type){
+  const blob = new Blob([text], {type: type || "text/plain"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+$("btnSql").addEventListener("click", async () => {
+  if (!DOCS.length){ log("Generate embeddings first.", "warn"); return; }
+  const sql = fullScript();
+  try { await navigator.clipboard.writeText(sql); log("SQL copied — "+sql.length+" characters.", "ok"); }
+  catch(e){ download(fqName().replace(/\./g,"_")+".sql", sql, "application/sql"); log("Clipboard blocked, downloaded the file instead.", "warn"); }
+});
+$("btnSqlFile").addEventListener("click", () => {
+  if (!DOCS.length){ log("Generate embeddings first.", "warn"); return; }
+  download(fqName().replace(/\./g,"_")+".sql", fullScript(), "application/sql");
+  log("SQL file downloaded.", "ok");
+});
+$("btnJson").addEventListener("click", () => {
+  if (!DOCS.length){ log("Generate embeddings first.", "warn"); return; }
+  const payload = {
+    table: fqName(),
+    dimensions: DIM,
+    source: $("provider").value === "local" ? "local-hash-64" : $("apiModel").value.trim(),
+    generated_at: new Date().toISOString(),
+    documents: DOCS.map(d => ({ doc_id:d.id, content:d.text, token_count:d.tokens, embedding: Array.from(d.vec, v => Number(v.toFixed(6))) }))
+  };
+  download(fqName().replace(/\./g,"_")+".json", JSON.stringify(payload,null,2), "application/json");
+  log("JSON downloaded.", "ok");
+});
+
+/* ---------------- wiring ---------------- */
+$("provider").addEventListener("change", () => {
+  const api = $("provider").value === "api";
+  $("apiOpts").style.display = api ? "block" : "none";
+  $("localOpts").style.display = api ? "none" : "block";
+});
+$("splitMode").addEventListener("change", () => {
+  $("delim").disabled = $("splitMode").value !== "custom";
+});
+["kSchema","kTable","stampMode"].forEach(id => $(id).addEventListener("input", refreshLabel));
+$("stampMode").addEventListener("change", refreshLabel);
+$("btnClear").addEventListener("click", () => {
+  $("input").value = ""; DOCS = []; render(); log("Cleared.");
+});
+$("btnSample").addEventListener("click", () => {
+  $("input").value = [
+    "Kinetica stores embeddings natively with the VECTOR type, so similarity search runs inside the same engine that handles joins, filters and time windows. There is no second store to keep in sync.",
+    "A vector column can be declared with NORMALIZE, which gives every inserted vector an L2 magnitude of one. That makes cosine comparisons cheaper and keeps distances consistent across batches.",
+    "The espresso machine needs descaling every two months. Hard water shortens the interval, and the group head gasket should be replaced once a year.",
+    "HNSW indexes update automatically as rows change, while CAGRA indexes need a manual refresh. Pick HNSW when the table is written continuously.",
+    "Sourdough starter doubles in about six hours at room temperature. Feed it equal weights of flour and water, and discard half before each feed."
+  ].join("\n\n");
+  log("Sample loaded — three Kinetica paragraphs and two unrelated ones, so the distances mean something.");
+});
+
+$("splitMode").dispatchEvent(new Event("change"));
+$("kTable").value = defaultTable();
+refreshLabel();
+render();
+log("Ready. Paste paragraphs, generate, then store.", "ok");
+log("Target table defaults to vector_embeddings_"+stamp()+".", "dim");
+</script>
+</body>
+</html>
