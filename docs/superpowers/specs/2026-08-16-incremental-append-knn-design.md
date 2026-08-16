@@ -42,7 +42,7 @@ Two problems with the current tool:
 | Execution locus | All pairwise work runs in Kinetica (HNSW/CAGRA index + kNN + edge aggregation as SQL); browser orchestrates and reads back edges |
 | Edge-weight update | **Exact-incremental** via per-edge accumulators `sum_wv`, `sum_w`; `weight = sum_wv/sum_w`; append adds contributions, never full recompute |
 | Entity identity across batches | **Heuristic + blocking key** — indexed lookup against the persisted node table, then the existing heuristic merge within the small block |
-| kNN bound | **Top-k + cosine-distance cutoff**, both configurable with shipped defaults |
+| kNN bound | **Top-k + cosine-distance cutoff**, exposed as UI parameters `k` (default 20) and `β` (default 0.35) |
 | Graph creation UX | Editable SQL textarea pre-populated with generated statements + a Run button; `CREATE … GRAPH` becomes runnable from the box (no longer comment-only) |
 
 **Chosen architecture — browser-orchestrated, Kinetica-executed.** The browser
@@ -149,9 +149,11 @@ tool has never had.)
 
 - **Write mode** selector in the store panel, extending the create-mode
   control: `Recreate (drop + rebuild)` · `Append (incremental)`.
-- **Two new Append-only fields:** `k` neighbors (default 20) and
-  `max cosine distance` cutoff (default 0.35), retyped per session like every
-  other setting.
+- **Two new UI parameters in the Graph panel** (always visible, retyped per
+  session like every other setting): `k` — neighbors per document (default 20)
+  — and `β` — max cosine distance cutoff (default 0.35). Both feed the kNN step
+  of the Append pipeline; they are labeled inputs, not hidden constants, so the
+  operator can tune recall vs. cost per run.
 - In Append mode the graph action becomes **"Append batch to Kinetica"** and
   runs the pipeline, logging each stage: ids assigned `N..M` → docs inserted →
   mentions extracted → "merged P into existing entities, created Q new" →
@@ -164,6 +166,10 @@ tool has never had.)
   button executes the box contents statement-by-statement via `ksql()`; the box
   is user-editable before running. `CREATE … GRAPH` is populated live (not
   comment-only) but the user opts in by running the box. Copy/Download remain.
+  This box **supersedes the current "Store graph in Kinetica" silent-execution
+  behavior**: today that button fires the generated DDL + INSERTs invisibly and
+  stops short of `CREATE … GRAPH`; the box makes every statement visible,
+  editable, and includes the runnable graph creation.
 
 ## Error handling
 
