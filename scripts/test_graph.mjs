@@ -100,3 +100,48 @@ test("mergeMentions heuristic merges business by core, not different people", ()
   ], "heuristic");
   assert.equal(ppl.length, 2);
 });
+
+test("cosineOf is the dot product", () => {
+  assert.equal(core.cosineOf([1,0],[1,0]), 1);
+  assert.equal(core.cosineOf([1,0],[0,1]), 0);
+});
+
+test("edgeType orders labels canonically", () => {
+  assert.equal(core.edgeType("Person","Person"), "person-person");
+  assert.equal(core.edgeType("Business","Business"), "business-business");
+  assert.equal(core.edgeType("Business","Person"), "person-business");
+  assert.equal(core.edgeType("Person","Business"), "person-business");
+});
+
+test("computeEdges: identical single-doc vectors give weight ~1", () => {
+  const ents = [
+    {name:"A",label:"Person",docIds:[1]},
+    {name:"B",label:"Person",docIds:[2]},
+  ];
+  const dv = new Map([[1,[1,0]],[2,[1,0]]]);
+  const e = core.computeEdges(ents, dv);
+  assert.equal(e.length, 1);
+  assert.ok(Math.abs(e[0].weight - 1) < 1e-3, "weight ~1");
+  assert.equal(e[0].node1, "A"); assert.equal(e[0].node2, "B");
+  assert.equal(e[0].type, "person-person");
+});
+
+test("computeEdges: orthogonal vectors give weight ~0.5", () => {
+  const ents = [{name:"A",label:"Person",docIds:[1]},{name:"B",label:"Business",docIds:[2]}];
+  const dv = new Map([[1,[1,0]],[2,[0,1]]]);
+  const e = core.computeEdges(ents, dv);
+  assert.ok(Math.abs(e[0].weight - 0.5) < 1e-3, "weight ~0.5");
+  assert.equal(e[0].type, "person-business");
+});
+
+test("computeEdges: co-occurrence in same doc gives weight ~1", () => {
+  const ents = [{name:"A",label:"Person",docIds:[1]},{name:"B",label:"Person",docIds:[1]}];
+  const dv = new Map([[1,[0.6,0.8]]]);
+  const e = core.computeEdges(ents, dv);
+  assert.ok(Math.abs(e[0].weight - 1) < 1e-6);
+});
+
+test("filterEdges keeps weight >= threshold", () => {
+  const edges = [{node1:"A",node2:"B",type:"x",weight:0.7},{node1:"A",node2:"C",type:"x",weight:0.4}];
+  assert.equal(core.filterEdges(edges, 0.5).length, 1);
+});
