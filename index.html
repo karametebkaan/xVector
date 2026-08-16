@@ -204,6 +204,36 @@ Separate each one with a blank line by default — every paragraph becomes one r
         <button class="ghost" id="btnJson">Download .json</button>
       </div>
     </div>
+
+    <div class="panel">
+      <h2>Entities <span id="entCount" style="font-weight:400;letter-spacing:0;text-transform:none"></span></h2>
+      <div class="row">
+        <div class="field">
+          <label for="extractProvider">Extraction</label>
+          <select id="extractProvider">
+            <option value="local">Local heuristic (offline)</option>
+            <option value="llm">LLM — chat completions</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="resolveMode">Disambiguation</label>
+          <select id="resolveMode">
+            <option value="heuristic">Ad-hoc heuristic (default)</option>
+            <option value="none">None — exact match</option>
+            <option value="api">External API</option>
+          </select>
+        </div>
+      </div>
+      <div id="llmOpts" style="display:none">
+        <div class="field"><label for="llmUrl">Chat endpoint</label><input type="text" id="llmUrl" placeholder="https://host/v1/chat/completions"></div>
+        <div class="field"><label for="llmModel">Chat model</label><input type="text" id="llmModel" placeholder="gpt-4o-mini"></div>
+      </div>
+      <div id="resolveApiOpts" style="display:none">
+        <div class="field"><label for="resolveUrl">Resolver endpoint</label><input type="text" id="resolveUrl" placeholder="https://host/resolve"></div>
+      </div>
+      <div class="btns"><button class="go" id="btnExtract">Extract entities</button></div>
+      <div id="entOut"><div class="empty">No entities extracted yet.</div></div>
+    </div>
   </div>
 
   <!-- ============ RIGHT ============ -->
@@ -356,6 +386,7 @@ Separate each one with a blank line by default — every paragraph becomes one r
 const DIM = 64;
 const $ = id => document.getElementById(id);
 let DOCS = [];           // {id, text, tokens, vec:Float64Array}
+let ENTITIES = [];       // {name, label, docIds, count, aliases}
 let LAST_TABLE = "";     // fully qualified name of the last successful write
 
 /* ---------------- console ---------------- */
@@ -861,6 +892,62 @@ function fullScript(){
   return parts.join(";\n\n")+";\n";
 }
 
+/* ---------------- entities panel ---------------- */
+function renderEntities(){
+  const host = $("entOut"); host.innerHTML = "";
+  $("entCount").textContent = ENTITIES.length ? "— "+ENTITIES.length : "";
+  if (!ENTITIES.length){ host.innerHTML = '<div class="empty">No entities extracted yet.</div>'; return; }
+  for (const e of ENTITIES){
+    const el = document.createElement("div"); el.className = "doc";
+    const color = e.label === "Person" ? "var(--signal)" : "var(--warm)";
+    const head = document.createElement("div"); head.className = "doc-head";
+    head.innerHTML = '<span class="doc-id" style="color:'+color+'">'+e.label+'</span>'+
+      '<span class="doc-meta">'+e.count+' mentions · docs '+e.docIds.join(", ")+'</span>';
+    const txt = document.createElement("div"); txt.className = "doc-text"; txt.textContent = e.name;
+    el.append(head, txt);
+    if (e.aliases.length > 1){
+      const al = document.createElement("div"); al.className = "doc-meta";
+      al.textContent = "aliases: "+e.aliases.join(" · "); el.appendChild(al);
+    }
+    host.appendChild(el);
+  }
+}
+
+async function extractLLM(docs){
+  const url = $("llmUrl").value.trim(); const model = $("llmModel").value.trim();
+  if (!url) throw new Error("Set the chat endpoint URL");
+  const headers = {"Content-Type":"application/json"};
+  const key = $("apiKey").value.trim(); if (key) headers["Authorization"] = "Bearer "+key;
+  const sys = "Extract entities labeled Person or Business (organizations, facilities, institutions). "+
+    "Return ONLY JSON: {\"entities\":[{\"name\":\"...\",\"label\":\"Person|Business\",\"doc_ids\":[int]}]}.";
+  const usr = docs.map(d => "["+d.id+"] "+d.text).join("\n\n");
+  const res = await fetch(url, {method:"POST", headers, body: JSON.stringify({
+    model, messages:[{role:"system",content:sys},{role:"user",content:usr}],
+    temperature:0, response_format:{type:"json_object"} })});
+  const text = await res.text(); let obj;
+  try { const j = JSON.parse(text); const c = j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content; obj = JSON.parse(c || text); }
+  catch(e){ throw new Error("LLM response was not parseable JSON: "+text.slice(0,200)); }
+  const list = (obj.entities || []);
+  // flatten into mentions (one per doc_id)
+  const mentions = [];
+  for (const e of list){ const lbl = e.label === "Business" ? "Business" : "Person";
+    for (const id of (e.doc_ids||[])) mentions.push({surface:String(e.name), label:lbl, docId:id}); }
+  return mentions;
+}
+
+async function resolveApi(mentions){
+  const url = $("resolveUrl").value.trim();
+  if (!url) { log("No resolver endpoint set — falling back to heuristic.", "warn"); return mergeMentions(mentions, "heuristic"); }
+  try {
+    const res = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({mentions})});
+    const j = JSON.parse(await res.text());
+    if (Array.isArray(j.entities)) return j.entities.map(e => ({
+      name:String(e.name), label: e.label === "Business" ? "Business":"Person",
+      docIds:[...new Set(e.doc_ids||[])].sort((a,b)=>a-b), count:(e.count||(e.doc_ids||[]).length), aliases:(e.aliases||[String(e.name)]) }));
+    throw new Error("no entities array");
+  } catch(e){ log("Resolver API failed ("+e.message+") — using heuristic.", "warn"); return mergeMentions(mentions, "heuristic"); }
+}
+
 /* ---------------- Kinetica transport ---------------- */
 async function ksql(statement, limit){
   const base = $("kUrl").value.trim().replace(/\/+$/,"");
@@ -1058,10 +1145,31 @@ $("provider").addEventListener("change", () => {
 $("splitMode").addEventListener("change", () => {
   $("delim").disabled = $("splitMode").value !== "custom";
 });
+$("extractProvider").addEventListener("change", () => {
+  $("llmOpts").style.display = $("extractProvider").value === "llm" ? "block" : "none";
+});
+$("resolveMode").addEventListener("change", () => {
+  $("resolveApiOpts").style.display = $("resolveMode").value === "api" ? "block" : "none";
+});
+$("btnExtract").addEventListener("click", async () => {
+  if (!DOCS.length){ log("Generate embeddings first, then extract.", "warn"); return; }
+  const btn = $("btnExtract"); btn.disabled = true; btn.textContent = "Extracting…";
+  try {
+    const docs = DOCS.map(d => ({id:d.id, text:d.text}));
+    const mentions = $("extractProvider").value === "llm" ? await extractLLM(docs) : extractLocalMentions(docs);
+    const mode = $("resolveMode").value;
+    ENTITIES = mode === "api" ? await resolveApi(mentions) : mergeMentions(mentions, mode);
+    for (const e of ENTITIES){ if (e.name.length > 64) log("Name over 64 chars will be truncated for CHAR(64): "+e.name, "warn"); }
+    renderEntities();
+    const np = ENTITIES.filter(e=>e.label==="Person").length, nb = ENTITIES.length-np;
+    log("Extracted "+ENTITIES.length+" entities ("+np+" people, "+nb+" businesses).", "ok");
+  } catch(e){ log("Extraction failed: "+e.message, "err"); }
+  finally { btn.disabled = false; btn.textContent = "Extract entities"; }
+});
 ["kSchema","kTable","stampMode"].forEach(id => $(id).addEventListener("input", refreshLabel));
 $("stampMode").addEventListener("change", refreshLabel);
 $("btnClear").addEventListener("click", () => {
-  $("input").value = ""; DOCS = []; render(); log("Cleared.");
+  $("input").value = ""; DOCS = []; ENTITIES = []; render(); renderEntities(); log("Cleared.");
 });
 $("btnSample").addEventListener("click", () => {
   $("input").value = [
@@ -1078,6 +1186,7 @@ $("splitMode").dispatchEvent(new Event("change"));
 $("kTable").value = defaultTable();
 refreshLabel();
 render();
+renderEntities();
 log("Ready. Paste paragraphs, generate, then store.", "ok");
 log("Target table defaults to vector_embeddings_"+stamp()+".", "dim");
 </script>
