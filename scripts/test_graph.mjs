@@ -220,3 +220,39 @@ test("blockKey: person -> surname, business -> suffix-stripped core", () => {
   assert.equal(core.blockKey("Acme Inc", "Business"), "acme");
   assert.equal(core.blockKey("University of Texas", "Business"), "university of texas");
 });
+
+test("sameEntity matches person variants and business cores, rejects different people", () => {
+  assert.equal(core.sameEntity("Person", "Kaan Karamete", "K Karamete"), true);
+  assert.equal(core.sameEntity("Person", "Jane Smith", "John Smith"), false);
+  assert.equal(core.sameEntity("Business", "Acme Corp", "Acme Inc"), true);
+});
+
+test("resolveIncremental merges a new variant into an existing block, keeping the PK name", () => {
+  const existing = [{name:"Kaan Karamete", label:"Person", docIds:[1], aliases:["Kaan Karamete"], count:1, block_key:"karamete"}];
+  const r = core.resolveIncremental([{surface:"K Karamete", label:"Person", docId:5}], existing);
+  assert.equal(r.nodeUpserts.length, 1);
+  const e = r.nodeUpserts[0];
+  assert.equal(e.name, "Kaan Karamete");              // PK name preserved
+  assertNonStrict.deepEqual(e.docIds, [1,5]);
+  assert.ok(e.aliases.includes("K Karamete"));
+  assert.equal(e.count, 2);
+  assert.equal(e.block_key, "karamete");
+  assertNonStrict.deepEqual(r.membership, [{node:"Kaan Karamete", docId:5, label:"Person"}]);
+});
+
+test("resolveIncremental spawns a new node when nothing in the block matches", () => {
+  const existing = [{name:"Jane Smith", label:"Person", docIds:[2], aliases:["Jane Smith"], count:1, block_key:"smith"}];
+  const r = core.resolveIncremental([{surface:"John Smith", label:"Person", docId:7}], existing);
+  assert.equal(r.nodeUpserts.length, 1);
+  assert.equal(r.nodeUpserts[0].name, "John Smith");
+  assert.equal(r.nodeUpserts[0].block_key, "smith");
+  assertNonStrict.deepEqual(r.nodeUpserts[0].docIds, [7]);
+});
+
+test("resolveIncremental on an empty table creates fresh nodes with membership", () => {
+  const r = core.resolveIncremental([{surface:"Acme Corp", label:"Business", docId:3}], []);
+  assert.equal(r.nodeUpserts.length, 1);
+  assert.equal(r.nodeUpserts[0].name, "Acme Corp");
+  assert.equal(r.nodeUpserts[0].block_key, "acme");
+  assertNonStrict.deepEqual(r.membership, [{node:"Acme Corp", docId:3, label:"Business"}]);
+});

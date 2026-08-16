@@ -712,6 +712,16 @@ function businessCore(surface){
 function longest(surfaces){
   return surfaces.slice().sort((x,y) => y.split(/\s+/).length - x.split(/\s+/).length || y.length - x.length)[0];
 }
+function sameEntity(label, surfaceA, surfaceB){
+  if (label === "Person"){
+    const a = personName(surfaceA), b = personName(surfaceB);
+    if (a.sur !== b.sur) return false;
+    const n = Math.min(a.given.length, b.given.length);
+    for (let i=0;i<n;i++) if (!givenCompatible(a.given[i], b.given[i])) return false;
+    return true;
+  }
+  return businessCore(surfaceA) === businessCore(surfaceB);
+}
 function mergeMentions(mentions, mode){
   // group into buckets of arrays of mentions
   const buckets = [];
@@ -728,17 +738,9 @@ function mergeMentions(mentions, mode){
       continue;
     }
     if (m.label === "Person"){
-      const pn = personName(m.surface);
-      put(m, b => {
-        const bn = personName(b.items[0].surface);
-        if (bn.sur !== pn.sur) return false;
-        const n = Math.min(bn.given.length, pn.given.length);
-        for (let i=0;i<n;i++) if (!givenCompatible(bn.given[i], pn.given[i])) return false;
-        return true;
-      });
+      put(m, b => sameEntity("Person", b.items[0].surface, m.surface));
     } else {
-      const core2 = businessCore(m.surface);
-      put(m, b => businessCore(b.items[0].surface) === core2);
+      put(m, b => sameEntity("Business", b.items[0].surface, m.surface));
     }
   }
   return buckets.map(b => {
@@ -751,6 +753,44 @@ function mergeMentions(mentions, mode){
 function blockKey(name, label){
   if (label === "Business") return businessCore(name);
   return personName(name).sur;
+}
+function unionSorted(a, b){ return [...new Set([...(a||[]), ...(b||[])])]; }
+
+function resolveIncremental(mentions, existingNodes){
+  const existing = (existingNodes||[]).map(n => ({
+    name: n.name, label: n.label,
+    docIds: (n.docIds||[]).slice(),
+    aliases: (n.aliases||[]).slice(),
+    count: n.count||0,
+    block_key: n.block_key || blockKey(n.name, n.label)
+  }));
+  const keyOf = e => e.label+" "+e.block_key;
+  const byKey = new Map();
+  for (const n of existing){ const k = keyOf(n); if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push(n); }
+
+  const fresh = mergeMentions(mentions, "heuristic");
+  const nodeUpserts = [], membership = [];
+  for (const e of fresh){
+    const bk = blockKey(e.name, e.label);
+    const k = e.label+" "+bk;
+    const cands = byKey.get(k) || [];
+    const match = cands.find(n => sameEntity(e.label, n.name, e.name));
+    let canonical;
+    if (match){
+      match.docIds = unionSorted(match.docIds, e.docIds).sort((a,b)=>a-b);
+      match.aliases = unionSorted(match.aliases, [e.name, ...e.aliases]).sort();
+      match.count = match.count + e.count;
+      canonical = match;                       // PK name unchanged
+    } else {
+      canonical = { name:e.name, label:e.label,
+        docIds:e.docIds.slice().sort((a,b)=>a-b), count:e.count,
+        aliases:unionSorted([e.name], e.aliases).sort(), block_key:bk };
+      cands.push(canonical); byKey.set(k, cands);
+    }
+    nodeUpserts.push(canonical);
+    for (const d of e.docIds) membership.push({ node: canonical.name, docId: d, label: e.label });
+  }
+  return { nodeUpserts, membership };
 }
 /* CORE:END */
 
