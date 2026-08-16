@@ -371,6 +371,27 @@ Separate each one with a blank line by default — every paragraph becomes one r
       <div class="btns"><button id="btnSearch">Search</button></div>
       <div id="searchOut"></div>
     </div>
+
+    <div class="panel">
+      <h2>Graph <span id="edgeCount" style="font-weight:400;letter-spacing:0;text-transform:none"></span></h2>
+      <div class="row">
+        <div class="field" style="max-width:160px">
+          <label for="gPrefix">Table prefix</label>
+          <input type="text" id="gPrefix" value="graph">
+        </div>
+        <div class="field">
+          <label for="threshold">Min weight — <span id="thVal">0.50</span></label>
+          <input type="range" id="threshold" min="0" max="1" step="0.01" value="0.5">
+        </div>
+      </div>
+      <div class="btns">
+        <button class="go" id="btnBuildGraph">Build graph</button>
+        <button id="btnStoreGraph">Store graph in Kinetica</button>
+        <button class="ghost" id="btnGraphSql">Copy graph SQL</button>
+      </div>
+      <div class="bar" id="gbar"><span></span></div>
+      <div id="graphOut"><div class="empty">No graph built yet.</div></div>
+    </div>
   </div>
 </div>
 
@@ -387,7 +408,9 @@ const DIM = 64;
 const $ = id => document.getElementById(id);
 let DOCS = [];           // {id, text, tokens, vec:Float64Array}
 let ENTITIES = [];       // {name, label, docIds, count, aliases}
+let EDGES = [];          // {node1, node2, type, weight}
 let LAST_TABLE = "";     // fully qualified name of the last successful write
+let LAST_GRAPH = { nodes:"", edges:"" };  // fully qualified names of last graph tables
 
 /* ---------------- console ---------------- */
 function log(msg, cls){
@@ -913,6 +936,31 @@ function renderEntities(){
   }
 }
 
+function graphOpts(){
+  return { prefix: ($("gPrefix").value||"graph").trim(), stamp: stamp(),
+    schema: ($("kSchema").value||"").trim(), createMode: $("createMode").value,
+    batchSize: Math.max(1, parseInt($("batchSize").value,10)||50), createdAt: nowLiteral() };
+}
+
+function renderGraph(){
+  const host = $("graphOut"); host.innerHTML = "";
+  const th = parseFloat($("threshold").value);
+  const kept = filterEdges(EDGES, th);
+  $("edgeCount").textContent = EDGES.length ? "— "+kept.length+" of "+EDGES.length+" edges · "+ENTITIES.length+" nodes" : "";
+  if (!EDGES.length){ host.innerHTML = '<div class="empty">No graph built yet.</div>'; return; }
+  if (!kept.length){ host.innerHTML = '<div class="empty">No edges at or above '+th.toFixed(2)+'.</div>'; return; }
+  const el = document.createElement("table"); el.className = "res";
+  const hr = el.insertRow(); ["source","target","type","weight"].forEach(h => { const th2=document.createElement("th"); th2.textContent=h; hr.appendChild(th2); });
+  for (const e of kept){
+    const tr = el.insertRow();
+    tr.insertCell().textContent = e.node1;
+    tr.insertCell().textContent = e.node2;
+    tr.insertCell().textContent = e.type;
+    const c = tr.insertCell(); c.className = "num"; c.textContent = e.weight.toFixed(4);
+  }
+  host.appendChild(el);
+}
+
 async function extractLLM(docs){
   const url = $("llmUrl").value.trim(); const model = $("llmModel").value.trim();
   if (!url) throw new Error("Set the chat endpoint URL");
@@ -1166,10 +1214,46 @@ $("btnExtract").addEventListener("click", async () => {
   } catch(e){ log("Extraction failed: "+e.message, "err"); }
   finally { btn.disabled = false; btn.textContent = "Extract entities"; }
 });
+
+$("threshold").addEventListener("input", () => { $("thVal").textContent = parseFloat($("threshold").value).toFixed(2); renderGraph(); });
+$("btnBuildGraph").addEventListener("click", () => {
+  if (!ENTITIES.length){ log("Extract entities first.", "warn"); return; }
+  const dv = new Map(DOCS.map(d => [d.id, d.vec]));
+  const ops = ENTITIES.reduce((n,e)=>n+e.docIds.length,0);
+  if (ENTITIES.length*ENTITIES.length*Math.pow(ops/Math.max(1,ENTITIES.length),2) > 2e6)
+    log("Large entity/doc set — edge computation may be slow.", "warn");
+  EDGES = computeEdges(ENTITIES, dv);
+  renderGraph();
+  log("Built "+EDGES.length+" candidate edges across "+ENTITIES.length+" entities.", "ok");
+});
+$("btnGraphSql").addEventListener("click", async () => {
+  if (!EDGES.length){ log("Build the graph first.", "warn"); return; }
+  const sql = graphScript(ENTITIES, EDGES, graphOpts(), parseFloat($("threshold").value));
+  try { await navigator.clipboard.writeText(sql); log("Graph SQL copied — "+sql.length+" characters.", "ok"); }
+  catch(e){ download("graph_"+stamp()+".sql", sql, "application/sql"); log("Clipboard blocked, downloaded the file instead.", "warn"); }
+});
+$("btnStoreGraph").addEventListener("click", async () => {
+  if (!EDGES.length){ log("Build the graph first.", "warn"); return; }
+  const btn = $("btnStoreGraph"); btn.disabled = true;
+  const bar = $("gbar"); bar.style.display = "block"; const fill = bar.querySelector("span");
+  const opts = graphOpts(); const th = parseFloat($("threshold").value);
+  try {
+    const d = graphDdl(opts);
+    if (d){ await ksql(d.nodes); await ksql(d.edges); log("Graph tables ready.", "ok"); }
+    const ni = nodeInserts(ENTITIES, opts), ei = edgeInserts(EDGES, opts, th);
+    const all = ni.concat(ei); let done = 0;
+    for (const stmt of all){ await ksql(stmt); done++; fill.style.width = Math.round(100*done/all.length)+"%"; }
+    LAST_GRAPH = { nodes: graphTableName(opts.prefix,"nodes",opts.stamp,opts.schema),
+                   edges: graphTableName(opts.prefix,"edges",opts.stamp,opts.schema) };
+    log("Stored "+ENTITIES.length+" nodes and "+filterEdges(EDGES,th).length+" edges. Post-join via ARRAY_CONTAINS(doc_ids, doc_id).", "ok");
+  } catch(e){ log("Graph write failed: "+e.message, "err"); log("The SQL is still valid — use Copy graph SQL and run it in Workbench.", "dim"); }
+  finally { btn.disabled = false; setTimeout(()=>{ bar.style.display="none"; fill.style.width="0"; }, 1200); }
+});
+
 ["kSchema","kTable","stampMode"].forEach(id => $(id).addEventListener("input", refreshLabel));
 $("stampMode").addEventListener("change", refreshLabel);
 $("btnClear").addEventListener("click", () => {
-  $("input").value = ""; DOCS = []; ENTITIES = []; render(); renderEntities(); log("Cleared.");
+  $("input").value = ""; DOCS = []; ENTITIES = []; EDGES = []; render(); renderEntities(); renderGraph(); log("Cleared.");
 });
 $("btnSample").addEventListener("click", () => {
   $("input").value = [
@@ -1187,6 +1271,7 @@ $("kTable").value = defaultTable();
 refreshLabel();
 render();
 renderEntities();
+renderGraph();
 log("Ready. Paste paragraphs, generate, then store.", "ok");
 log("Target table defaults to vector_embeddings_"+stamp()+".", "dim");
 </script>
