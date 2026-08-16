@@ -1421,21 +1421,23 @@ async function appendBatch(){
   const th = parseFloat($("threshold").value);
   const step = (n,tot) => fill.style.width = Math.round(100*n/tot)+"%";
   try {
-    // 1. global ids
-    const mx = await readRows(maxIdQuery(emb));                     // may throw if table absent
+    // 1. ensure table exists (with if-not-exists semantics for append mode) before max lookup
+    const embCreate = embDdl({ table: emb, createMode: "ifnot", dim: DIM, normalize: $("normalize").checked });
+    if (embCreate) await ksql(embCreate);              // ensure table exists so MAX never errors on absent table
+    // 2. assign global ids
+    const mx = await readRows(maxIdQuery(emb));         // fresh/empty table -> NULL -> base 1; real failure still throws pre-insert
     const base = nextIdBase(mx && mx.rows.length ? mx.rows[0][0] : null);
     DOCS.forEach((d,i) => d.id = base + i);
     log("Assigned doc_ids "+base+".."+(base+DOCS.length-1)+".", "ok");
-    // 2. ensure table + insert embeddings (append)
-    const d = ddl(); if (d) await ksql(d);
+    // 3. insert embeddings (append)
     const ins = insertStatements();
     for (let i=0;i<ins.length;i++){ await ksql(ins[i]); step(i+1, ins.length+6); }
     if ($("hnsw").checked) await ksql(hnswIndexSql(emb));
     log("Inserted "+DOCS.length+" documents into "+emb+".", "ok");
-    // 3. extract mentions from the new docs
+    // 4. extract mentions from the new docs
     const docs = DOCS.map(x => ({id:x.id, text:x.text}));
     const mentions = $("extractProvider").value === "llm" ? await extractLLM(docs) : extractLocalMentions(docs);
-    // 4. incremental identity resolution against the persisted node table
+    // 5. incremental identity resolution against the persisted node table
     const gd = graphDdl(opts), md = membershipDdl(opts);
     if (gd){ await ksql(gd.nodes); await ksql(gd.edges); } if (md) await ksql(md);
     const keys = [...new Set(mentions.map(m => blockKey(m.surface, m.label)))];
@@ -1450,7 +1452,7 @@ async function appendBatch(){
     for (const s of nodeInserts(res.nodeUpserts, {...opts, upsert:true})) await ksql(s);
     for (const s of membershipInserts(res.membership, opts)) await ksql(s);
     log("Resolved "+res.nodeUpserts.length+" entities; wrote "+res.membership.length+" membership rows.", "ok");
-    // 5. kNN candidate pairs (index-backed, per new doc)
+    // 6. kNN candidate pairs (index-backed, per new doc)
     const newIds = new Set(DOCS.map(d => d.id));
     const pairs = []; const neighborDocs = new Set();
     const seen = new Set();                                          // dedupe new-new to one orientation
@@ -1464,7 +1466,7 @@ async function appendBatch(){
       pairs.push({i:doc.id, j:doc.id, cos:1});                       // same-doc co-occurrence
     }
     step(ins.length+3, ins.length+6);
-    // 6. membership for old neighbor docs + new docs -> entity-pair deltas
+    // 7. membership for old neighbor docs + new docs -> entity-pair deltas
     const membership = new Map();
     for (const m of res.membership){ if (!membership.has(m.docId)) membership.set(m.docId, []); membership.get(m.docId).push({node:m.node, label:m.label}); }
     if (neighborDocs.size){
@@ -1473,7 +1475,7 @@ async function appendBatch(){
         if (!membership.has(id)) membership.set(id, []); membership.get(id).push({node, label:(Array.isArray(label)?label[0]:label)}); }
     }
     const deltas = docPairContributions(pairs, membership);
-    // 7. merge with existing accumulators and upsert edges
+    // 8. merge with existing accumulators and upsert edges
     const names = [...new Set(deltas.flatMap(e => [e.node1, e.node2]))];
     const accum = new Map();
     if (names.length){
