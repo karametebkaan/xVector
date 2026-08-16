@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import test from "node:test";
 import assert from "node:assert/strict";
+import assertNonStrict from "node:assert";
 
 export function loadCore(){
   const path = fileURLToPath(new URL("../index.html", import.meta.url));
@@ -27,4 +28,30 @@ test("esc doubles single quotes, strips NUL, preserves spaces", () => {
 test("num formats to <=6 decimals", () => {
   assert.equal(core.num(0.1234567), "0.123457");
   assert.equal(core.num(1), "1");
+});
+
+test("extractLocalMentions finds person and business with title/suffix", () => {
+  const m = core.extractLocalMentions([{id:1, text:"Dr Kaan Karamete leads Acme Corp."}]);
+  assertNonStrict.deepEqual(m, [
+    {surface:"Kaan Karamete", label:"Person",   docId:1},
+    {surface:"Acme Corp",     label:"Business", docId:1},
+  ]);
+});
+
+test("extractLocalMentions keeps multiword orgs, strips leading article", () => {
+  const m = core.extractLocalMentions([{id:2, text:"The University of Texas hired Jane Doe."}]);
+  assertNonStrict.deepEqual(m, [
+    {surface:"University of Texas", label:"Business", docId:2},
+    {surface:"Jane Doe",           label:"Person",   docId:2},
+  ]);
+});
+
+test("extractLocalMentions skips bare single tokens, keeps acronyms as business", () => {
+  const m = core.extractLocalMentions([{id:3, text:"Chicago is big. IBM announced results."}]);
+  assertNonStrict.deepEqual(m, [{surface:"IBM", label:"Business", docId:3}]);
+});
+
+test("extractLocalMentions accepts title-preceded single surname as person", () => {
+  const m = core.extractLocalMentions([{id:4, text:"President Obama spoke."}]);
+  assertNonStrict.deepEqual(m, [{surface:"Obama", label:"Person", docId:4}]);
 });

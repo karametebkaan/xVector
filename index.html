@@ -581,6 +581,59 @@ function render(){
 function esc(s){ return String(s).replace(/'/g, "''").replace(/\u0000/g,""); }
 function num(x){ return String(Number(x.toFixed(6))); }
 /* CORE:END */
+
+/* CORE:BEGIN */
+const TITLES = new Set(["mr","mrs","ms","miss","dr","prof","professor","president","ceo","cfo","cto","senator","governor","mayor","sir","lord","dame","rev","gen","col","capt","sgt","judge","justice"]);
+const ARTICLES = new Set(["the","a","an"]);
+const BIZ_WORDS = new Set(["inc","llc","ltd","corp","corporation","co","company","gmbh","plc","lp","llp","group","holdings","partners","systems","technologies","technology","labs","laboratories","bank","capital","ventures","university","college","institute","hospital","clinic","airport","station","stadium","museum","library","hotel","foundation","association","agency","department","ministry","committee","center","centre","school","church","factory","plant","mall","market","store","university"]);
+const CONNECTORS = new Set(["of","and","the","for","&"]);
+
+function isCap(tok){ return /^[A-Z][A-Za-z.'&-]*$/.test(tok); }
+function isAcronym(tok){ return /^[A-Z]{2,}$/.test(tok); }
+function bareWord(tok){ return tok.replace(/[.,;:!?()'"]+$/,"").replace(/^[.,;:!?()'"]+/,""); }
+
+function classifySpan(nameTokens, personFlag){
+  if (!nameTokens.length) return null;
+  const lower = nameTokens.map(t => bareWord(t).toLowerCase());
+  if (lower.some(t => BIZ_WORDS.has(t))) return "Business";
+  if (nameTokens.length === 1 && isAcronym(bareWord(nameTokens[0]))) return "Business";
+  if (personFlag) return "Person";
+  if (nameTokens.length >= 2) return "Person";
+  return null;
+}
+
+function extractLocalMentions(docs){
+  const out = [];
+  for (const doc of docs){
+    const toks = (doc.text.match(/[A-Za-z][A-Za-z.'&-]*/g) || []);
+    let i = 0;
+    while (i < toks.length){
+      if (!isCap(toks[i])){ i++; continue; }
+      // collect a span of Capitalized tokens joined by lowercase connectors
+      const span = [toks[i]]; let j = i + 1;
+      while (j < toks.length){
+        if (isCap(toks[j])){ span.push(toks[j]); j++; continue; }
+        const c = toks[j].toLowerCase();
+        if (CONNECTORS.has(c) && j+1 < toks.length && isCap(toks[j+1])){ span.push(toks[j], toks[j+1]); j += 2; continue; }
+        break;
+      }
+      // strip leading title / article
+      let personFlag = false; let start = 0;
+      const first = bareWord(span[0]).toLowerCase();
+      if (TITLES.has(first)){ personFlag = true; start = 1; }
+      else if (ARTICLES.has(first)){ start = 1; }
+      let name = span.slice(start);
+      // drop trailing connectors
+      while (name.length && CONNECTORS.has(bareWord(name[name.length-1]).toLowerCase())) name = name.slice(0,-1);
+      const label = classifySpan(name, personFlag);
+      if (label) out.push({ surface: name.map(bareWord).join(" "), label, docId: doc.id });
+      i = j;
+    }
+  }
+  return out;
+}
+/* CORE:END */
+
 function vecLiteral(v){
   const p = [];
   for (let i=0;i<v.length;i++) p.push(num(v[i]));
