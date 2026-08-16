@@ -310,7 +310,7 @@ function resolveIncremental(mentions, existingNodes){
     count: n.count||0,
     block_key: n.block_key || blockKey(n.name, n.label)
   }));
-  const keyOf = e => e.label+" "+e.block_key;
+  const keyOf = e => e.label+"\u0000"+e.block_key;
   const byKey = new Map();
   for (const n of existing){ const k = keyOf(n); if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push(n); }
 
@@ -318,7 +318,7 @@ function resolveIncremental(mentions, existingNodes){
   const nodeUpserts = [], membership = [];
   for (const e of fresh){
     const bk = blockKey(e.name, e.label);
-    const k = e.label+" "+bk;
+    const k = e.label+"\u0000"+bk;
     const cands = byKey.get(k) || [];
     const match = cands.find(n => sameEntity(e.label, n.name, e.name));
     let canonical;
@@ -459,7 +459,7 @@ function docPairContributions(pairs, membership){
     const flip = nb < na;
     const n1 = flip ? nb : na, n2 = flip ? na : nb;
     const l1 = flip ? lb : la, l2 = flip ? la : lb;
-    const key = n1+" "+n2;
+    const key = n1+"\u0000"+n2;
     let cur = acc.get(key);
     if (!cur){ cur = {node1:n1, node2:n2, type: edgeType(l1,l2), d_wv:0, d_w:0}; acc.set(key,cur); }
     cur.d_wv += del.wv; cur.d_w += del.w;
@@ -894,9 +894,9 @@ async function appendBatch(){
     const accum = new Map();
     if (names.length){
       const ea = await readRows(edgeAccumQuery(graphTableName(opts.prefix,"edges",opts.stamp,opts.schema), names));
-      if (ea) for (const [n1,n2,swv,sw] of ea.rows) accum.set(n1+" "+n2, {sum_wv:swv||0, sum_w:sw||0});
+      if (ea) for (const [n1,n2,swv,sw] of ea.rows) accum.set(n1+"\u0000"+n2, {sum_wv:swv||0, sum_w:sw||0});
     }
-    EDGES = deltas.map(e => { const m = mergeEdgeAccum(accum.get(e.node1+" "+e.node2), {d_wv:e.d_wv, d_w:e.d_w});
+    EDGES = deltas.map(e => { const m = mergeEdgeAccum(accum.get(e.node1+"\u0000"+e.node2), {d_wv:e.d_wv, d_w:e.d_w});
       return {node1:e.node1, node2:e.node2, type:e.type, weight:m.weight, sum_wv:m.sum_wv, sum_w:m.sum_w}; });
     EDGES.sort((a,b) => b.weight - a.weight);
     for (const s of edgeUpserts(EDGES, opts)) await ksql(s);
