@@ -211,3 +211,12 @@ test("embDdl adds PRIMARY KEY on doc_id and honors NORMALIZE", () => {
   assert.match(core.embDdl({...base, createMode:"replace"}), /CREATE OR REPLACE TABLE/);
   assert.equal(core.embDdl({...base, createMode:"skip"}), null);
 });
+
+test("blockKey: person -> surname, business -> suffix-stripped core", () => {
+  assert.equal(core.blockKey("Kaan Karamete", "Person"), "karamete");
+  assert.equal(core.blockKey("K Karamete", "Person"), "karamete");
+  assert.equal(core.blockKey("Obama", "Person"), "obama");
+  assert.equal(core.blockKey("Acme Corp", "Business"), "acme");
+  assert.equal(core.blockKey("Acme Inc", "Business"), "acme");
+  assert.equal(core.blockKey("University of Texas", "Business"), "university of texas");
+});

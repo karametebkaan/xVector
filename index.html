@@ -748,6 +748,10 @@ function mergeMentions(mentions, mode){
     return { name: longest(surfaces), label: b.label, docIds, count: b.items.length, aliases };
   });
 }
+function blockKey(name, label){
+  if (label === "Business") return businessCore(name);
+  return personName(name).sur;
+}
 /* CORE:END */
 
 /* CORE:BEGIN */
