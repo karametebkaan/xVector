@@ -379,6 +379,23 @@ Separate each one with a blank line by default — every paragraph becomes one r
           <label for="gPrefix">Table prefix</label>
           <input type="text" id="gPrefix" value="graph">
         </div>
+        <div class="field" style="max-width:200px">
+          <label for="writeMode">Write mode</label>
+          <select id="writeMode">
+            <option value="recreate">Recreate (drop + rebuild)</option>
+            <option value="append">Append (incremental)</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div class="field" style="max-width:110px">
+          <label for="knnK">kNN k</label>
+          <input type="number" id="knnK" value="20" min="1" max="1000">
+        </div>
+        <div class="field" style="max-width:140px">
+          <label for="knnBeta">β max cos-dist</label>
+          <input type="number" id="knnBeta" value="0.35" min="0" max="2" step="0.01">
+        </div>
         <div class="field">
           <label for="threshold">Min weight — <span id="thVal">0.50</span></label>
           <input type="range" id="threshold" min="0" max="1" step="0.01" value="0.5">
@@ -386,7 +403,7 @@ Separate each one with a blank line by default — every paragraph becomes one r
       </div>
       <div class="btns">
         <button class="go" id="btnBuildGraph">Build graph</button>
-        <button id="btnStoreGraph">Store graph in Kinetica</button>
+        <button id="btnAppendBatch">Append batch to Kinetica</button>
         <button class="ghost" id="btnGraphSql">Copy graph SQL</button>
       </div>
       <div class="bar" id="gbar"><span></span></div>
@@ -1392,21 +1409,98 @@ $("btnGraphSql").addEventListener("click", async () => {
   try { await navigator.clipboard.writeText(sql); log("Graph SQL copied — "+sql.length+" characters.", "ok"); }
   catch(e){ download("graph_"+stamp()+".sql", sql, "application/sql"); log("Clipboard blocked, downloaded the file instead.", "warn"); }
 });
-$("btnStoreGraph").addEventListener("click", async () => {
-  if (!EDGES.length){ log("Build the graph first.", "warn"); return; }
-  const btn = $("btnStoreGraph"); btn.disabled = true;
+async function readRows(sql){ const r = await ksql(sql); return recordsToRows(r.records); }
+
+async function appendBatch(){
+  if (!DOCS.length){ log("Generate embeddings first.", "warn"); return; }
+  const btn = $("btnAppendBatch"); btn.disabled = true;
   const bar = $("gbar"); bar.style.display = "block"; const fill = bar.querySelector("span");
-  const opts = graphOpts(); const th = parseFloat($("threshold").value);
+  const opts = graphOpts(); const emb = fqName();
+  const k = Math.max(1, parseInt($("knnK").value,10)||20);
+  const beta = Math.max(0, parseFloat($("knnBeta").value)||0.35);
+  const th = parseFloat($("threshold").value);
+  const step = (n,tot) => fill.style.width = Math.round(100*n/tot)+"%";
   try {
-    const d = graphDdl(opts);
-    if (d){ await ksql(d.nodes); await ksql(d.edges); log("Graph tables ready.", "ok"); }
-    const ni = nodeInserts(ENTITIES, opts), ei = edgeInserts(EDGES, opts, th);
-    const all = ni.concat(ei); let done = 0;
-    for (const stmt of all){ await ksql(stmt); done++; fill.style.width = Math.round(100*done/all.length)+"%"; }
-    log("Stored "+ENTITIES.length+" nodes and "+filterEdges(EDGES,th).length+" edges. Post-join via ARRAY_CONTAINS(doc_ids, doc_id).", "ok");
-  } catch(e){ log("Graph write failed: "+e.message, "err"); log("The SQL is still valid — use Copy graph SQL and run it in Workbench.", "dim"); }
-  finally { btn.disabled = false; setTimeout(()=>{ bar.style.display="none"; fill.style.width="0"; }, 1200); }
+    // 1. global ids
+    const mx = await readRows(maxIdQuery(emb));                     // may throw if table absent
+    const base = nextIdBase(mx && mx.rows.length ? mx.rows[0][0] : null);
+    DOCS.forEach((d,i) => d.id = base + i);
+    log("Assigned doc_ids "+base+".."+(base+DOCS.length-1)+".", "ok");
+    // 2. ensure table + insert embeddings (append)
+    const d = ddl(); if (d) await ksql(d);
+    const ins = insertStatements();
+    for (let i=0;i<ins.length;i++){ await ksql(ins[i]); step(i+1, ins.length+6); }
+    if ($("hnsw").checked) await ksql(hnswIndexSql(emb));
+    log("Inserted "+DOCS.length+" documents into "+emb+".", "ok");
+    // 3. extract mentions from the new docs
+    const docs = DOCS.map(x => ({id:x.id, text:x.text}));
+    const mentions = $("extractProvider").value === "llm" ? await extractLLM(docs) : extractLocalMentions(docs);
+    // 4. incremental identity resolution against the persisted node table
+    const gd = graphDdl(opts), md = membershipDdl(opts);
+    if (gd){ await ksql(gd.nodes); await ksql(gd.edges); } if (md) await ksql(md);
+    const keys = [...new Set(mentions.map(m => blockKey(m.surface, m.label)))];
+    let existingNodes = [];
+    if (keys.length){
+      const nb = await readRows(nodeBlockQuery(graphTableName(opts.prefix,"nodes",opts.stamp,opts.schema), keys));
+      if (nb) existingNodes = nb.rows.map(r => ({ name:r[0], label:(Array.isArray(r[1])?r[1][0]:r[1]),
+        docIds:(Array.isArray(r[2])?r[2]:[]), count:r[3]||0, aliases:(Array.isArray(r[4])?r[4]:[]), block_key:r[5] }));
+    }
+    const res = resolveIncremental(mentions, existingNodes);
+    ENTITIES = res.nodeUpserts;
+    for (const s of nodeInserts(res.nodeUpserts, {...opts, upsert:true})) await ksql(s);
+    for (const s of membershipInserts(res.membership, opts)) await ksql(s);
+    log("Resolved "+res.nodeUpserts.length+" entities; wrote "+res.membership.length+" membership rows.", "ok");
+    // 5. kNN candidate pairs (index-backed, per new doc)
+    const newIds = new Set(DOCS.map(d => d.id));
+    const pairs = []; const neighborDocs = new Set();
+    const seen = new Set();                                          // dedupe new-new to one orientation
+    for (const doc of DOCS){
+      const rows = await readRows(knnQuery(emb, vecLiteral(doc.vec), k, beta, doc.id));
+      if (rows) for (const [j, cos] of rows.rows){
+        if (newIds.has(j)){ const a=Math.min(doc.id,j), b=Math.max(doc.id,j); const key=a+"-"+b;
+          if (seen.has(key)) continue; seen.add(key); pairs.push({i:a, j:b, cos}); }
+        else { pairs.push({i:doc.id, j, cos}); neighborDocs.add(j); }
+      }
+      pairs.push({i:doc.id, j:doc.id, cos:1});                       // same-doc co-occurrence
+    }
+    step(ins.length+3, ins.length+6);
+    // 6. membership for old neighbor docs + new docs -> entity-pair deltas
+    const membership = new Map();
+    for (const m of res.membership){ if (!membership.has(m.docId)) membership.set(m.docId, []); membership.get(m.docId).push({node:m.node, label:m.label}); }
+    if (neighborDocs.size){
+      const mm = await readRows(membershipQuery(graphTableName(opts.prefix,"membership",opts.stamp,opts.schema), [...neighborDocs]));
+      if (mm) for (const [node, docId, label] of mm.rows){ const id=docId|0;
+        if (!membership.has(id)) membership.set(id, []); membership.get(id).push({node, label:(Array.isArray(label)?label[0]:label)}); }
+    }
+    const deltas = docPairContributions(pairs, membership);
+    // 7. merge with existing accumulators and upsert edges
+    const names = [...new Set(deltas.flatMap(e => [e.node1, e.node2]))];
+    const accum = new Map();
+    if (names.length){
+      const ea = await readRows(edgeAccumQuery(graphTableName(opts.prefix,"edges",opts.stamp,opts.schema), names));
+      if (ea) for (const [n1,n2,swv,sw] of ea.rows) accum.set(n1+" "+n2, {sum_wv:swv||0, sum_w:sw||0});
+    }
+    EDGES = deltas.map(e => { const m = mergeEdgeAccum(accum.get(e.node1+" "+e.node2), {d_wv:e.d_wv, d_w:e.d_w});
+      return {node1:e.node1, node2:e.node2, type:e.type, weight:m.weight, sum_wv:m.sum_wv, sum_w:m.sum_w}; });
+    EDGES.sort((a,b) => b.weight - a.weight);
+    for (const s of edgeUpserts(EDGES, opts)) await ksql(s);
+    step(ins.length+6, ins.length+6);
+    renderGraph();
+    log("Updated "+EDGES.length+" edges ("+filterEdges(EDGES,th).length+" at/above "+th.toFixed(2)+"). Run CREATE GRAPH from the SQL box to build the solver graph.", "ok");
+    LAST_TABLE = emb;
+  } catch(e){
+    log("Append failed: "+e.message, "err");
+    log("Batch is safe to retry (upserts converge). Or use Copy graph SQL / the editable box in Workbench.", "dim");
+  } finally { btn.disabled = false; setTimeout(()=>{ bar.style.display="none"; fill.style.width="0"; }, 1200); }
+}
+
+$("btnAppendBatch").addEventListener("click", appendBatch);
+$("writeMode").addEventListener("change", () => {
+  const append = $("writeMode").value === "append";
+  $("btnAppendBatch").style.display = append ? "" : "none";
+  $("btnBuildGraph").textContent = append ? "Preview graph (local)" : "Build graph";
 });
+$("writeMode").dispatchEvent(new Event("change"));
 
 ["kSchema","kTable","stampMode"].forEach(id => $(id).addEventListener("input", refreshLabel));
 $("stampMode").addEventListener("change", refreshLabel);
