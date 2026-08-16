@@ -664,7 +664,7 @@ async function refreshOllamaModels(){
   }
 }
 
-/* ---------------- */
+/* ---------------- splitting ---------------- */
 function splitText(){
   const raw = $("input").value;
   const mode = $("splitMode").value;
@@ -1155,11 +1155,14 @@ function nowLiteral(){
 function ddl(){
   return embDdl({ table: fqName(), createMode: $("createMode").value, dim: DIM, normalize: $("normalize").checked });
 }
+function embedSource(){
+  return $("provider").value === "local" ? "local-hash-64"
+       : ($("provider").value === "ollama" ? $("ollamaEmbedModel").value.trim() : $("apiModel").value.trim() || "api").slice(0,64);
+}
 function insertStatements(){
   const t = fqName();
   const size = Math.max(1, parseInt($("batchSize").value,10) || 50);
-  const src = $("provider").value === "local" ? "local-hash-64"
-            : ($("provider").value === "ollama" ? $("ollamaEmbedModel").value.trim() : $("apiModel").value.trim() || "api").slice(0,64);
+  const src = embedSource();
   const ts = nowLiteral();
   const cols = "(doc_id, content, token_count, char_count, embed_source, created_at, embedding)";
   const out = [];
@@ -1456,8 +1459,7 @@ $("btnJson").addEventListener("click", () => {
   const payload = {
     table: fqName(),
     dimensions: DIM,
-    source: $("provider").value === "local" ? "local-hash-64"
-          : ($("provider").value === "ollama" ? $("ollamaEmbedModel").value.trim() : $("apiModel").value.trim()),
+    source: embedSource(),
     generated_at: new Date().toISOString(),
     documents: DOCS.map(d => ({ doc_id:d.id, content:d.text, token_count:d.tokens, embedding: Array.from(d.vec, v => Number(v.toFixed(6))) }))
   };
