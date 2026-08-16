@@ -1234,13 +1234,16 @@ async function extractLLM(docs){
     "Return ONLY JSON: {\"entities\":[{\"name\":\"...\",\"label\":\"Person|Business\",\"doc_ids\":[int]}]}.";
   const usr = docs.map(d => "["+d.id+"] "+d.text).join("\n\n");
   const messages = [{role:"system",content:sys},{role:"user",content:usr}];
+  const schema = {type:"object", properties:{entities:{type:"array", items:{type:"object",
+    properties:{name:{type:"string"}, label:{type:"string", enum:["Person","Business"]},
+    doc_ids:{type:"array", items:{type:"integer"}}}, required:["name","label","doc_ids"]}}}, required:["entities"]};
   let content;
   if ($("extractProvider").value === "ollama"){
     const base  = ($("ollamaUrl").value.trim().replace(/\/+$/,"")) || "/ollama";
     const model = $("ollamaChatModel").value.trim();
     if (!model) throw new Error("Pick an Ollama chat model (Refresh to load the list)");
     const res = await fetch(base+"/api/chat", {method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({model, messages, stream:false, format:"json"})});
+      body: JSON.stringify({model, messages, stream:false, format:schema, options:{temperature:0}})});
     const text = await res.text();
     if (!res.ok) throw new Error("Ollama /api/chat returned "+res.status+": "+text.slice(0,300));
     let j; try { j = JSON.parse(text); } catch(e){ throw new Error("Ollama chat sent back non-JSON: "+text.slice(0,200)); }
@@ -1258,10 +1261,32 @@ async function extractLLM(docs){
   }
   let obj; try { obj = JSON.parse(content); } catch(e){ throw new Error("LLM response was not parseable JSON: "+String(content).slice(0,200)); }
   const list = (obj.entities || []);
+  const valid = new Set(docs.map(d => d.id));
   const mentions = [];
-  for (const e of list){ const lbl = e.label === "Business" ? "Business" : "Person";
-    for (const id of (e.doc_ids||[])) mentions.push({surface:String(e.name), label:lbl, docId:id}); }
+  for (const e of list){
+    const surface = String(e.name || "").trim();
+    if (!surface) continue;
+    const lbl = normLabel(e.label);
+    // Trust doc_ids only when they name docs in this batch; otherwise recover
+    // attribution by scanning the batch for the surface form. Small chat models
+    // routinely omit or hallucinate doc_ids, so an entity must never vanish for it.
+    let ids = (Array.isArray(e.doc_ids) ? e.doc_ids : []).filter(n => valid.has(n));
+    if (!ids.length){
+      const needle = surface.toLowerCase();
+      ids = docs.filter(d => d.text.toLowerCase().includes(needle)).map(d => d.id);
+    }
+    for (const id of ids) mentions.push({surface, label:lbl, docId:id});
+  }
   return mentions;
+}
+// Fold any chat model's label wording onto the two-type schema. Exact "Person"/
+// "Business" pass straight through; common organization synonyms map to Business;
+// anything unrecognized defaults to Person.
+function normLabel(v){
+  const s = String(v || "").trim().toLowerCase();
+  if (s === "business") return "Business";
+  if (s === "person") return "Person";
+  return (s.includes("org") || s.includes("compan") || s.includes("institut") || s.includes("facilit") || s.includes("busin")) ? "Business" : "Person";
 }
 
 async function resolveApi(mentions){
