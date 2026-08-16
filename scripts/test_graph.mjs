@@ -186,3 +186,28 @@ test("graphScript includes commented CREATE GRAPH trailer", () => {
   assert.match(s, /-- CREATE UNDIRECTED GRAPH entity_graph_20260101/);
   assert.match(s, /\(1 - weight\) AS WEIGHT_VALUESPECIFIED/);
 });
+
+test("nextIdBase: empty/null table starts at 1, else max+1", () => {
+  assert.equal(core.nextIdBase(null), 1);
+  assert.equal(core.nextIdBase(undefined), 1);
+  assert.equal(core.nextIdBase(0), 1);
+  assert.equal(core.nextIdBase(8), 9);
+  assert.equal(core.nextIdBase("12"), 13);
+});
+
+test("maxIdQuery targets doc_id", () => {
+  assert.equal(core.maxIdQuery("ki.vector_embeddings_20260101"),
+    "SELECT MAX(doc_id) AS max_id FROM ki.vector_embeddings_20260101");
+});
+
+test("embDdl adds PRIMARY KEY on doc_id and honors NORMALIZE", () => {
+  const base = {table:"vector_embeddings_20260101", createMode:"ifnot", dim:64, normalize:true};
+  const d = core.embDdl(base);
+  assert.match(d, /CREATE TABLE IF NOT EXISTS vector_embeddings_20260101/);
+  assert.match(d, /doc_id INT NOT NULL/);
+  assert.match(d, /embedding VECTOR\(64, NORMALIZE\) NOT NULL/);
+  assert.match(d, /PRIMARY KEY \(doc_id\)/);
+  assert.match(core.embDdl({...base, normalize:false}), /VECTOR\(64\) NOT NULL/);
+  assert.match(core.embDdl({...base, createMode:"replace"}), /CREATE OR REPLACE TABLE/);
+  assert.equal(core.embDdl({...base, createMode:"skip"}), null);
+});

@@ -864,6 +864,31 @@ function graphScript(entities, edges, opts, threshold){
 }
 /* CORE:END */
 
+/* CORE:BEGIN */
+function embDdl(opts){
+  if (opts.createMode === "skip") return null;
+  const head = opts.createMode === "replace"
+    ? "CREATE OR REPLACE TABLE "+opts.table
+    : "CREATE TABLE IF NOT EXISTS "+opts.table;
+  const norm = opts.normalize ? opts.dim+", NORMALIZE" : String(opts.dim);
+  return head+"\n(\n"+
+    "    doc_id INT NOT NULL,\n"+
+    "    content VARCHAR NOT NULL,\n"+
+    "    token_count INT,\n"+
+    "    char_count INT,\n"+
+    "    embed_source VARCHAR(64),\n"+
+    "    created_at TIMESTAMP NOT NULL,\n"+
+    "    embedding VECTOR("+norm+") NOT NULL,\n"+
+    "    PRIMARY KEY (doc_id)\n"+
+    ")";
+}
+function nextIdBase(maxId){
+  const m = Number(maxId);
+  return (Number.isFinite(m) && m > 0) ? Math.floor(m) + 1 : 1;
+}
+function maxIdQuery(table){ return "SELECT MAX(doc_id) AS max_id FROM "+table; }
+/* CORE:END */
+
 function vecLiteral(v){
   const p = [];
   for (let i=0;i<v.length;i++) p.push(num(v[i]));
@@ -875,20 +900,7 @@ function nowLiteral(){
          pad(d.getHours())+":"+pad(d.getMinutes())+":"+pad(d.getSeconds());
 }
 function ddl(){
-  const t = fqName();
-  const mode = $("createMode").value;
-  if (mode === "skip") return null;
-  const head = mode === "replace" ? "CREATE OR REPLACE TABLE "+t : "CREATE TABLE IF NOT EXISTS "+t;
-  const norm = $("normalize").checked ? DIM+", NORMALIZE" : String(DIM);
-  return head+"\n(\n"+
-    "    doc_id INT NOT NULL,\n"+
-    "    content VARCHAR NOT NULL,\n"+
-    "    token_count INT,\n"+
-    "    char_count INT,\n"+
-    "    embed_source VARCHAR(64),\n"+
-    "    created_at TIMESTAMP NOT NULL,\n"+
-    "    embedding VECTOR("+norm+") NOT NULL\n"+
-    ")";
+  return embDdl({ table: fqName(), createMode: $("createMode").value, dim: DIM, normalize: $("normalize").checked });
 }
 function insertStatements(){
   const t = fqName();
