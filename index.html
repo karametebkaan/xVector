@@ -631,6 +631,31 @@ async function embedOllama(texts){
   return out;
 }
 
+async function ollamaModels(){
+  const base = ($("ollamaUrl").value.trim().replace(/\/+$/,"")) || "/ollama";
+  const res = await fetch(base+"/api/tags");
+  if (!res.ok) throw new Error("/api/tags returned "+res.status);
+  const j = JSON.parse(await res.text());
+  return (j.models||[]).map(m => m.name).filter(Boolean);
+}
+function fillModelSelect(sel, names){
+  if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = "";
+  for (const n of names){ const o = document.createElement("option"); o.value = n; o.textContent = n; sel.appendChild(o); }
+  if (names.includes(cur)) sel.value = cur;
+}
+async function refreshOllamaModels(){
+  try {
+    const names = await ollamaModels();
+    fillModelSelect($("ollamaEmbedModel"), names);
+    fillModelSelect($("ollamaChatModel"), names);
+    log("Ollama: "+names.length+" model(s) available", names.length ? "ok" : "warn");
+  } catch(e){
+    log("Can't reach Ollama at "+(($("ollamaUrl").value.trim())||"/ollama")+" — is `ollama serve` running and did you start serve.py with --ollama? ("+e.message+")", "err");
+  }
+}
+
 /* ---------------- */
 function splitText(){
   const raw = $("input").value;
@@ -1425,7 +1450,9 @@ $("provider").addEventListener("change", () => {
   $("apiOpts").style.display    = v === "api"    ? "block" : "none";
   $("ollamaOpts").style.display = v === "ollama" ? "block" : "none";
   $("localOpts").style.display  = v === "local"  ? "block" : "none";
+  if (v === "ollama" && !$("ollamaEmbedModel").options.length) refreshOllamaModels();
 });
+$("btnOllamaRefresh").addEventListener("click", refreshOllamaModels);
 $("splitMode").addEventListener("change", () => {
   $("delim").disabled = $("splitMode").value !== "custom";
 });
