@@ -655,6 +655,17 @@ function render(){
 /* CORE:BEGIN */
 function esc(s){ return String(s).replace(/'/g, "''").replace(/\u0000/g,""); }
 function num(x){ return String(Number(x.toFixed(6))); }
+function pickEmbeddings(json, expected){
+  let rows;
+  if (json && Array.isArray(json.embeddings)) rows = json.embeddings;               // Ollama native
+  else if (json && Array.isArray(json.data)) rows = json.data.map(r => r.embedding || r); // OpenAI-compatible
+  else if (Array.isArray(json)) rows = json;                                         // bare array
+  else throw new Error("No embeddings array in the response");
+  if (expected !== undefined && rows.length !== expected)
+    throw new Error("Asked for "+expected+" vectors, got "+rows.length);
+  for (const r of rows) if (!Array.isArray(r)) throw new Error("An embedding row is not an array");
+  return rows;
+}
 /* CORE:END */
 
 /* CORE:BEGIN */

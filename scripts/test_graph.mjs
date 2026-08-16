@@ -387,3 +387,19 @@ test("createGraphSql is runnable (uncommented) and aliases WEIGHT_VALUESPECIFIED
 test("hnswIndexSql targets the embedding column", () => {
   assert.equal(core.hnswIndexSql("ki.emb"), "ALTER TABLE ki.emb ADD HNSW INDEX (embedding)");
 });
+
+test("pickEmbeddings reads Ollama native shape", () => {
+  assert.deepEqual(core.pickEmbeddings({embeddings:[[1,2],[3,4]]}, 2), [[1,2],[3,4]]);
+});
+test("pickEmbeddings reads OpenAI-compatible shape", () => {
+  assert.deepEqual(core.pickEmbeddings({data:[{embedding:[1,2]}]}, 1), [[1,2]]);
+});
+test("pickEmbeddings reads a bare array", () => {
+  assert.deepEqual(core.pickEmbeddings([[1,2]], 1), [[1,2]]);
+});
+test("pickEmbeddings throws on count mismatch", () => {
+  assert.throws(() => core.pickEmbeddings({embeddings:[[1,2]]}, 2), /got 1/);
+});
+test("pickEmbeddings throws on unknown shape", () => {
+  assert.throws(() => core.pickEmbeddings({nope:true}), /No embeddings array/);
+});
