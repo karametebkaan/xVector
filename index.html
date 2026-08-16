@@ -577,8 +577,10 @@ function render(){
 }
 
 /* ---------------- SQL ---------------- */
-function esc(s){ return String(s).replace(/'/g, "''").replace(/\u0000/g,""); }
+/* CORE:BEGIN */
+function esc(s){ return String(s).replace(/'/g, "''").replace(/ /g,""); }
 function num(x){ return String(Number(x.toFixed(6))); }
+/* CORE:END */
 function vecLiteral(v){
   const p = [];
   for (let i=0;i<v.length;i++) p.push(num(v[i]));
