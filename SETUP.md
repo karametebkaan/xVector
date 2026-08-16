@@ -26,11 +26,9 @@ Ollama serves both the embedding models and the chat model used for entity
 extraction, reached through a same-origin `/ollama` proxy route in
 `scripts/serve.py` (mirrors the `/kinetica` proxy — no `OLLAMA_ORIGINS` needed).
 
-> **Status:** the first-class **Ollama provider** and the `--ollama` proxy flag
-> land with sub-project 1 — see
-> `docs/superpowers/specs/2026-08-16-ollama-provider-design.md`. Until then,
-> Ollama's OpenAI-compatible endpoint (`http://localhost:11434/v1/embeddings`) is
-> reachable via the generic **API** provider.
+> **Status:** the first-class **Ollama provider** (for both embeddings and extraction)
+> and the `--ollama` proxy flag are now available. Models are discovered via `/api/tags`
+> and reduction of >64-dim embeddings is applied via random projection.
 
 ### Install & run
 

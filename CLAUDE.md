@@ -21,6 +21,7 @@ samples/            paragraph fixtures for manual testing
 ```bash
 python3 scripts/serve.py                                   # serves :8000, proxies to :9191
 python3 scripts/serve.py --port 8080 --kinetica http://kinetica-host:9191
+python3 scripts/serve.py --kinetica http://localhost:9191 --ollama http://localhost:11434
 ```
 
 Then open http://localhost:8000 and set **Instance URL** to `/kinetica`. That routes SQL
@@ -34,7 +35,7 @@ Six stages, each a small set of functions in the `<script>` block:
 
 1. **Split** — `splitText()` cuts the textarea into documents (blank line / newline /
    custom delimiter / none) and applies a minimum-length filter.
-2. **Embed** — `embedLocal()` or `embedRemote()` returns `{vec: Float64Array(64), tokens}`
+2. **Embed** — `embedLocal()`, `embedRemote()`, or `embedOllama()` returns `{vec: Float64Array(64), tokens}`
    per document. Results live in the module-level `DOCS` array as
    `{id, text, tokens, vec}`.
 3. **Extract entities** — `extractLocalMentions()` or `extractLLM()` returns mentions
@@ -69,6 +70,17 @@ OpenAI-compatible `POST /v1/embeddings` with `{model, input: [...]}`, batched. H
 either truncates (correct for Matryoshka models like `text-embedding-3-*`) or applies a
 seeded random projection (better for everything else).
 
+### The Ollama provider
+
+`embedOllama()` posts a batch to `/ollama/api/embed` with the selected embedding model.
+The response shape varies — `pickEmbeddings(json, expected)` normalizes `embedding` arrays
+or bare arrays. When Ollama returns embeddings larger than 64 dims (e.g., `nomic-embed-text`
+at 768-d), the app reduces via random projection (not truncation, since these are not
+Matryoshka models). Model discovery runs via `/api/tags` to populate the embeddings dropdown;
+the `/ollama` proxy route (configured with `--ollama http://localhost:11434`) handles both
+GET and POST, mirroring the `/kinetica` proxy to sidestep CORS. The reduce "ask" option,
+if selected, is treated as a projection (no lookup request necessary).
+
 ### Entity extraction and disambiguation
 
 The local heuristic extractor, `extractLocalMentions()`, is a stand-in for real NER, exactly
@@ -84,6 +96,10 @@ Three disambiguation modes fold these into canonical entities `{name, label, doc
   the longest variant becomes the canonical name.
 - **None** (exact-match) — only identical-cased strings merge; each variant is a separate entity.
 - **External API** — `resolveApi()` POSTs to a custom endpoint and falls back to heuristic on error.
+
+The Ollama transport option for extraction uses `/ollama/api/chat` with the same 2-type
+(Person / Business) prompt, returning mentions in the `[{surface, label, docId}]` shape via
+`extractLLM()` with `format:"json"` and streaming disabled.
 
 ### Graph edges and tables
 
@@ -170,9 +186,10 @@ in the Entities panel to visually distinguish entity types.
 
 `scripts/test_graph.mjs` (`node --test scripts/test_graph.mjs`) covers the pure core
 functions — `extractLocalMentions()`, `mergeMentions()`, `computeEdges()`, `blockKey()`,
-`mergeEdgeAccum()`, `resolveIncremental()`, and the SQL emitters — which are wrapped in
-`/* CORE:BEGIN */ … /* CORE:END */` markers so the stdlib-only harness can extract and eval them.
-These functions underpin both Recreate and Append workflows.
+`mergeEdgeAccum()`, `resolveIncremental()`, `pickEmbeddings()`, and the SQL emitters — which
+are wrapped in `/* CORE:BEGIN */ … /* CORE:END */` markers so the stdlib-only harness can
+extract and eval them. These functions underpin both Recreate and Append workflows.
+`scripts/test_serve.py` covers the proxy route dispatcher `resolve_upstream()`.
 
 ## Kinetica specifics worth not re-deriving
 
