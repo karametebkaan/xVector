@@ -806,6 +806,44 @@ function edgeType(la, lb){
   if (p === 0) return "business-business";
   return "person-business";
 }
+function edgeDelta(cos, eps){
+  eps = (eps === undefined) ? 1e-6 : eps;
+  const d = 1 - cos;
+  const w = 1 / (eps + d);
+  const v = (1 + cos) / 2;
+  return { w, v, wv: w*v };
+}
+function mergeEdgeAccum(existing, delta){
+  const sum_wv = ((existing && existing.sum_wv) || 0) + delta.d_wv;
+  const sum_w  = ((existing && existing.sum_w)  || 0) + delta.d_w;
+  return { sum_wv, sum_w, weight: sum_w === 0 ? 0 : sum_wv / sum_w };
+}
+function docPairContributions(pairs, membership){
+  const acc = new Map();
+  const add = (na, la, nb, lb, del) => {
+    if (na === nb) return;
+    const flip = nb < na;
+    const n1 = flip ? nb : na, n2 = flip ? na : nb;
+    const l1 = flip ? lb : la, l2 = flip ? la : lb;
+    const key = n1+" "+n2;
+    let cur = acc.get(key);
+    if (!cur){ cur = {node1:n1, node2:n2, type: edgeType(l1,l2), d_wv:0, d_w:0}; acc.set(key,cur); }
+    cur.d_wv += del.wv; cur.d_w += del.w;
+  };
+  for (const p of pairs){
+    const A = membership.get(p.i) || [];
+    if (p.i === p.j){
+      const del = edgeDelta(1);
+      for (let x=0;x<A.length;x++) for (let y=x+1;y<A.length;y++)
+        add(A[x].node, A[x].label, A[y].node, A[y].label, del);
+    } else {
+      const B = membership.get(p.j) || [];
+      const del = edgeDelta(p.cos);
+      for (const a of A) for (const b of B) add(a.node, a.label, b.node, b.label, del);
+    }
+  }
+  return [...acc.values()];
+}
 function computeEdges(entities, docVec, eps){
   eps = (eps === undefined) ? 1e-6 : eps;
   const edges = [];
@@ -827,7 +865,7 @@ function computeEdges(entities, docVec, eps){
       if (sumW === 0) continue;
       const weight = sumWV / sumW;
       const [n1, n2] = A.name < B.name ? [A.name, B.name] : [B.name, A.name];
-      edges.push({ node1: n1, node2: n2, type: edgeType(A.label, B.label), weight });
+      edges.push({ node1: n1, node2: n2, type: edgeType(A.label, B.label), weight, sum_wv: sumWV, sum_w: sumW });
     }
   }
   edges.sort((x,y) => y.weight - x.weight);

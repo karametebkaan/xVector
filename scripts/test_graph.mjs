@@ -256,3 +256,56 @@ test("resolveIncremental on an empty table creates fresh nodes with membership",
   assert.equal(r.nodeUpserts[0].block_key, "acme");
   assertNonStrict.deepEqual(r.membership, [{node:"Acme Corp", docId:3, label:"Business"}]);
 });
+
+test("edgeDelta: cos=1 -> v=1 and huge w; cos=0 -> v=0.5, w~1", () => {
+  const d1 = core.edgeDelta(1);
+  assert.equal(d1.v, 1);
+  assert.ok(d1.w > 1e5);
+  assert.ok(Math.abs(d1.wv - d1.w) < 1e-6);
+  const d0 = core.edgeDelta(0);
+  assert.ok(Math.abs(d0.v - 0.5) < 1e-9);
+  assert.ok(Math.abs(d0.w - 1) < 1e-3);
+});
+
+test("mergeEdgeAccum sums and recomputes weight as sum_wv/sum_w", () => {
+  const a = core.mergeEdgeAccum(null, {d_wv:2, d_w:4});
+  assert.equal(a.sum_wv, 2); assert.equal(a.sum_w, 4); assert.equal(a.weight, 0.5);
+  const b = core.mergeEdgeAccum(a, {d_wv:2, d_w:4});
+  assert.equal(b.sum_wv, 4); assert.equal(b.sum_w, 8); assert.equal(b.weight, 0.5);
+  assert.equal(core.mergeEdgeAccum(null, {d_wv:0, d_w:0}).weight, 0);
+});
+
+test("docPairContributions: cross-doc pair expands to ordered entity edge", () => {
+  const mem = new Map([[1,[{node:"Z",label:"Person"}]],[2,[{node:"A",label:"Business"}]]]);
+  const out = core.docPairContributions([{i:1,j:2,cos:0.5}], mem);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].node1, "A"); assert.equal(out[0].node2, "Z");
+  assert.equal(out[0].type, "person-business");
+  assert.ok(out[0].d_w > 0 && out[0].d_wv > 0);
+});
+
+test("docPairContributions: same-doc self pair uses cos=1 co-occurrence", () => {
+  const mem = new Map([[1,[{node:"A",label:"Person"},{node:"B",label:"Person"}]]]);
+  const out = core.docPairContributions([{i:1,j:1,cos:0}], mem);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].node1, "A"); assert.equal(out[0].node2, "B");
+  assert.equal(out[0].type, "person-person");
+  assert.ok(Math.abs(out[0].d_wv - out[0].d_w) < 1e-6);   // v=1 => wv==w
+});
+
+test("docPairContributions: same entity in both docs makes no self-edge; dupes merge", () => {
+  const mem = new Map([[1,[{node:"A",label:"Person"}]],[2,[{node:"A",label:"Person"}]]]);
+  assert.equal(core.docPairContributions([{i:1,j:2,cos:1}], mem).length, 0);
+  const mem2 = new Map([[1,[{node:"A",label:"Person"}]],[2,[{node:"B",label:"Person"}]],[3,[{node:"B",label:"Person"}]]]);
+  const out = core.docPairContributions([{i:1,j:2,cos:0.5},{i:1,j:3,cos:0.5}], mem2);
+  assert.equal(out.length, 1);                            // A-B merged across two neighbor docs
+  assert.ok(out[0].d_w > core.edgeDelta(0.5).w * 1.5);   // both contributions summed
+});
+
+test("computeEdges now also returns sum_wv and sum_w", () => {
+  const ents = [{name:"A",label:"Person",docIds:[1]},{name:"B",label:"Person",docIds:[2]}];
+  const dv = new Map([[1,[1,0]],[2,[1,0]]]);
+  const e = core.computeEdges(ents, dv);
+  assert.ok(typeof e[0].sum_wv === "number" && typeof e[0].sum_w === "number");
+  assert.ok(Math.abs(e[0].sum_wv / e[0].sum_w - e[0].weight) < 1e-12);
+});
