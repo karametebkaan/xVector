@@ -245,6 +245,7 @@ Separate each one with a blank line by default — every paragraph becomes one r
         <select id="provider">
           <option value="local">Built in — deterministic, offline</option>
           <option value="api">HTTP API — OpenAI-compatible /v1/embeddings</option>
+          <option value="ollama">Ollama — native (local models)</option>
         </select>
       </div>
       <div id="localOpts">
@@ -280,6 +281,22 @@ Separate each one with a blank line by default — every paragraph becomes one r
           </select>
         </div>
         <p class="hint">Truncating suits Matryoshka models like <code>text-embedding-3-*</code>. For anything else, projecting preserves distances better.</p>
+      </div>
+      <div id="ollamaOpts" style="display:none">
+        <div class="field">
+          <label for="ollamaUrl">Ollama base URL</label>
+          <input type="text" id="ollamaUrl" value="/ollama" />
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="ollamaEmbedModel">Embedding model</label>
+            <select id="ollamaEmbedModel"></select>
+          </div>
+          <div class="field" style="max-width:120px;align-self:end">
+            <button type="button" class="ghost" id="btnOllamaRefresh">Refresh</button>
+          </div>
+        </div>
+        <p class="hint">Models come from <code>/api/tags</code>, which doesn't label embed vs chat — pick an embedding model like <code>nomic-embed-text</code>. Output over 64 dims is projected down (the "ask for 64" option doesn't apply to Ollama).</p>
       </div>
     </div>
 
@@ -549,8 +566,8 @@ function projection(src){
   PROJ_SRC = src;
   return PROJ;
 }
-function reduceVec(arr){
-  const mode = $("reduce").value;
+function reduceVec(arr, modeOverride){
+  const mode = modeOverride || $("reduce").value;
   if (arr.length === DIM) return l2norm(Float64Array.from(arr));
   if (mode === "project"){
     const P = projection(arr.length);
@@ -592,8 +609,29 @@ async function embedRemote(texts){
   }
   return out;
 }
+async function embedOllama(texts){
+  const base  = ($("ollamaUrl").value.trim().replace(/\/+$/,"")) || "/ollama";
+  const model = $("ollamaEmbedModel").value.trim();
+  if (!model) throw new Error("Pick an Ollama embedding model (Refresh to load the list)");
+  const size  = Math.max(1, parseInt($("apiBatch").value,10) || 16);
+  const rmode = $("reduce").value === "ask" ? "project" : $("reduce").value;
+  const out = [];
+  for (let i=0;i<texts.length;i+=size){
+    const chunk = texts.slice(i, i+size);
+    log("embedding "+(i+1)+"–"+(i+chunk.length)+" of "+texts.length+" via "+model);
+    const res = await fetch(base+"/api/embed", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({model, input: chunk, truncate:true})});
+    const txt = await res.text();
+    if (!res.ok) throw new Error("Ollama /api/embed returned "+res.status+": "+txt.slice(0,300));
+    let json; try { json = JSON.parse(txt); } catch(e){ throw new Error("Ollama sent back something that isn't JSON: "+txt.slice(0,200)); }
+    const rows = pickEmbeddings(json, chunk.length);
+    for (let k=0;k<rows.length;k++)
+      out.push({ vec: reduceVec(rows[k], rmode), tokens: tokenize(chunk[k]).length, srcDim: rows[k].length });
+  }
+  return out;
+}
 
-/* ---------------- splitting ---------------- */
+/* ---------------- */
 function splitText(){
   const raw = $("input").value;
   const mode = $("splitMode").value;
@@ -1087,7 +1125,8 @@ function ddl(){
 function insertStatements(){
   const t = fqName();
   const size = Math.max(1, parseInt($("batchSize").value,10) || 50);
-  const src = $("provider").value === "local" ? "local-hash-64" : ($("apiModel").value.trim()||"api").slice(0,64);
+  const src = $("provider").value === "local" ? "local-hash-64"
+            : ($("provider").value === "ollama" ? $("ollamaEmbedModel").value.trim() : $("apiModel").value.trim() || "api").slice(0,64);
   const ts = nowLiteral();
   const cols = "(doc_id, content, token_count, char_count, embed_source, created_at, embedding)";
   const out = [];
@@ -1245,7 +1284,8 @@ $("btnEmbed").addEventListener("click", async () => {
   btn.disabled = true; btn.textContent = "Generating…";
   try {
     const t0 = performance.now();
-    const res = $("provider").value === "local" ? embedLocal(texts) : await embedRemote(texts);
+    const pv = $("provider").value;
+    const res = pv === "local" ? embedLocal(texts) : pv === "ollama" ? await embedOllama(texts) : await embedRemote(texts);
     DOCS = texts.map((t,i) => ({ id:i+1, text:t, tokens:res[i].tokens, vec:res[i].vec }));
     render();
     const ms = Math.round(performance.now()-t0);
@@ -1310,7 +1350,8 @@ $("btnSearch").addEventListener("click", async () => {
   out.innerHTML = "";
   if (!q){ log("Type something to search for.", "warn"); return; }
   try {
-    const r = $("provider").value === "local" ? embedLocal([q]) : await embedRemote([q]);
+    const pv = $("provider").value;
+    const r = pv === "local" ? embedLocal([q]) : pv === "ollama" ? await embedOllama([q]) : await embedRemote([q]);
     const lit = vecLiteral(r[0].vec);
     const t = LAST_TABLE || fqName();
     const k = Math.max(1, parseInt($("topK").value,10) || 5);
@@ -1369,7 +1410,8 @@ $("btnJson").addEventListener("click", () => {
   const payload = {
     table: fqName(),
     dimensions: DIM,
-    source: $("provider").value === "local" ? "local-hash-64" : $("apiModel").value.trim(),
+    source: $("provider").value === "local" ? "local-hash-64"
+          : ($("provider").value === "ollama" ? $("ollamaEmbedModel").value.trim() : $("apiModel").value.trim()),
     generated_at: new Date().toISOString(),
     documents: DOCS.map(d => ({ doc_id:d.id, content:d.text, token_count:d.tokens, embedding: Array.from(d.vec, v => Number(v.toFixed(6))) }))
   };
@@ -1379,9 +1421,10 @@ $("btnJson").addEventListener("click", () => {
 
 /* ---------------- wiring ---------------- */
 $("provider").addEventListener("change", () => {
-  const api = $("provider").value === "api";
-  $("apiOpts").style.display = api ? "block" : "none";
-  $("localOpts").style.display = api ? "none" : "block";
+  const v = $("provider").value;
+  $("apiOpts").style.display    = v === "api"    ? "block" : "none";
+  $("ollamaOpts").style.display = v === "ollama" ? "block" : "none";
+  $("localOpts").style.display  = v === "local"  ? "block" : "none";
 });
 $("splitMode").addEventListener("change", () => {
   $("delim").disabled = $("splitMode").value !== "custom";
