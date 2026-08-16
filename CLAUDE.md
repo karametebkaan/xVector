@@ -96,17 +96,69 @@ The grammar-aligned tables match Kinetica's ARRAY and CHAR types:
 - **Node table** `graph_nodes_<datestamp>`: `node CHAR(64)` (canonical entity name), `label
   VARCHAR[]` (ARRAY['Person'] or ARRAY['Business']), `doc_ids INT[]` (documents where the
   entity appears, key for post-join), `doc_count INT`, `aliases VARCHAR[]` (merged variants),
-  `created_at TIMESTAMP`.
+  `block_key CHAR(64)` (blocking key for incremental merging in append mode), `created_at TIMESTAMP`,
+  `PRIMARY KEY (node)`.
 - **Edge table** `graph_edges_<datestamp>`: `node1` and `node2 CHAR(64)` (canonical names),
   `label VARCHAR[]` (ARRAY['person-business'] | ARRAY['person-person'] | ARRAY['business-business']),
-  `weight FLOAT` (IDW strength), `created_at TIMESTAMP`.
+  `weight FLOAT` (current IDW strength), `sum_wv DOUBLE` (cumulative numerator for incremental
+  recomputation), `sum_w DOUBLE` (cumulative denominator), `created_at TIMESTAMP`,
+  `PRIMARY KEY (node1, node2)`.
+- **Membership table** `graph_membership_<datestamp>` (new in append mode): `node CHAR(64)`,
+  `doc_id INT`, `label VARCHAR[]`. Maps entities to the documents they appear in, enabling
+  efficient aggregation joins at scale: instead of `ARRAY_CONTAINS(doc_ids, doc_id)`, the join is
+  `membership.doc_id = embeddings.doc_id`, which is O(M) with index rather than O(D·M) full scan.
 
-The `doc_ids INT[]` column in the node table enables the post-join via
-`ARRAY_CONTAINS(n.doc_ids, e.doc_id)`, reconnecting entities to their source documents.
+The `doc_ids INT[]` column in the node table still exists in both Recreate and Append modes;
+it accumulates the full list of document IDs an entity appears in.
 
-`graphDdl()`, `nodeInserts()`, `edgeInserts()`, and `graphScript()` emit the full DDL and
-INSERT statements. `CREATE GRAPH` is emitted only as a commented trailer, aliasing
-`(1 - weight) AS WEIGHT_VALUESPECIFIED` to convert edge strength to solver cost.
+**Write mode (Recreate vs Append).** The UI offers a dropdown to choose between:
+- **Recreate** — `CREATE OR REPLACE` for embeddings and graph tables; old data is lost. Use for
+  one-off analysis or when you want to start fresh.
+- **Append** — `CREATE TABLE IF NOT EXISTS` for all tables; new documents and entities are added
+  incrementally. The `doc_id` primary key is assigned from `MAX(doc_id) + 1` via `nextIdBase()`,
+  which prevents ID collisions across runs.
+
+**Document ID assignment.** In Append mode, `nextIdBase()` queries the current max ID from the
+embeddings table, then assigns `MAX+1, MAX+2, ...` to new documents. This runs synchronously in
+the orchestrator before embedding (Task 6), ensuring no two batches ever share an ID.
+
+**Incremental entity merging.** In Append mode, the kNN step finds neighbors of each new document.
+For each neighbor, if its source entities already exist in the graph (detected by `blockKey()`
+hashing), they merge: `resolveIncremental()` upserts them with accumulated doc_ids and updated
+block_key, falls back to the heuristic. Entities new to this batch still use the heuristic. The
+blocking key (`block_key` column, set by `blockKey()`) deterministically encodes the entity's
+identity: a stable hash of canonical name and label. In Append, the canonical name is never renamed;
+if an existing entity gains a new alias, the new variant is added to `aliases` but the `node` PK stays fixed.
+
+**Incremental edge accumulators.** Edges use `sum_wv` and `sum_w` columns. When computing kNN
+edges between new entities and old ones, the orchestrator (Task 6) calls `edgeUpserts()` instead
+of `edgeInserts()`, which upserts: for each (node1, node2) pair, it either inserts a new row with
+accumulators initialized to the current weight, or updates the existing accumulators. The final
+`weight = sum_wv / sum_w` recomputes on demand from history. `mergeEdgeAccum()` (in CORE)
+recomputes weights from accumulator rows returned by `edgeAccumQuery()`.
+
+**kNN step and per-new-doc search.** After embedding the new batch, `knnQuery()` runs one query per
+new document: `SELECT TOP k ... WHERE distance <= β` finds the k nearest neighbors in the existing
+embeddings table (all historical docs). The results feed entity extraction and edge building. This
+is the scalability win: only new documents are search origins; old documents are search targets. The
+index bounds the query cost (per new doc, not per total doc pair).
+
+**Membership table and aggregation.** The membership table (created and populated by `membershipInserts()`
+in Append) decouples entity→doc mapping from the node table's denormalized `doc_ids INT[]`. During
+incremental aggregation, the join `membership.node = nodes.node` on the upserted node set reconstructs
+the per-entity doc list efficiently. This avoids re-reading and re-expanding the entire `doc_ids` array
+at the DB layer, which scales better for entities appearing in hundreds of documents.
+
+**Canonical-name-is-stable rule.** In Append mode, the PK (node name) never changes. When an existing
+entity acquires a new name variant (e.g., "K Karamete" appearing as "Kaan Karamete"), the merge puts
+the longest/best existing variant back as the canonical node, and the new variant becomes an alias.
+This ensures graph queries and external links to entities remain valid across appends.
+
+`graphDdl()`, `nodeInserts()`, `edgeInserts()`, `edgeUpserts()`, `membershipInserts()`, and `graphScript()`
+emit the full DDL and INSERT/UPSERT statements. `createGraphSql()` emits a runnable `CREATE UNDIRECTED GRAPH`
+statement (no longer commented), aliasing `(1 - weight) AS WEIGHT_VALUESPECIFIED` to convert edge strength
+to solver cost. The editable SQL box (part of Task 7) replaces the old silent store button, allowing users
+to review and edit all statements (including the `CREATE GRAPH`) before execution.
 
 ### Palette extension
 
@@ -117,9 +169,10 @@ in the Entities panel to visually distinguish entity types.
 ### Testing the pure core functions
 
 `scripts/test_graph.mjs` (`node --test scripts/test_graph.mjs`) covers the pure core
-functions — `extractLocalMentions()`, `mergeMentions()`, `computeEdges()`, and the SQL
-emitters — which are wrapped in `/* CORE:BEGIN */ … /* CORE:END */` markers so the
-stdlib-only harness can extract and eval them.
+functions — `extractLocalMentions()`, `mergeMentions()`, `computeEdges()`, `blockKey()`,
+`mergeEdgeAccum()`, `resolveIncremental()`, and the SQL emitters — which are wrapped in
+`/* CORE:BEGIN */ … /* CORE:END */` markers so the stdlib-only harness can extract and eval them.
+These functions underpin both Recreate and Append workflows.
 
 ## Kinetica specifics worth not re-deriving
 

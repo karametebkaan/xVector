@@ -1,0 +1,5 @@
+Kaan Karamete presented the graph analytics roadmap at the Acme Corporation summit, where Acme announced a new vector-search product line for enterprise customers.
+
+The University of Texas expanded its partnership with Acme Inc, funding three more fellowships and a shared lab that K Karamete will co-supervise next year.
+
+Meanwhile, Globex Systems entered the market with a competing embedding service, hiring several researchers away from the university.
