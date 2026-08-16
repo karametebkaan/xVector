@@ -1230,7 +1230,10 @@ function renderGraph(){
 }
 
 async function extractLLM(docs){
-  const sys = "Extract entities labeled Person or Business (organizations, facilities, institutions). "+
+  const sys = "You are a named-entity extractor. Read every document (each prefixed with its [n] id) and "+
+    "extract EVERY distinct named entity: all people AND all organizations, companies, institutions, and "+
+    "places. Do not skip any proper noun. Label each Person (a human) or Business (any organization, company, "+
+    "institution, agency, or place). For each entity list every doc id [n] it appears in. "+
     "Return ONLY JSON: {\"entities\":[{\"name\":\"...\",\"label\":\"Person|Business\",\"doc_ids\":[int]}]}.";
   const usr = docs.map(d => "["+d.id+"] "+d.text).join("\n\n");
   const messages = [{role:"system",content:sys},{role:"user",content:usr}];
