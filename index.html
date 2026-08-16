@@ -408,6 +408,11 @@ Separate each one with a blank line by default — every paragraph becomes one r
       </div>
       <div class="bar" id="gbar"><span></span></div>
       <div id="graphOut"><div class="empty">No graph built yet.</div></div>
+      <div class="field" style="margin-top:12px">
+        <label for="graphSqlBox">Graph SQL — editable, runs top to bottom</label>
+        <textarea id="graphSqlBox" rows="10" spellcheck="false" placeholder="Build or Append to populate; edit freely, then Run."></textarea>
+      </div>
+      <div class="btns"><button class="go" id="btnRunGraphSql">Run SQL in Kinetica</button></div>
     </div>
   </div>
 </div>
@@ -1401,6 +1406,7 @@ $("btnBuildGraph").addEventListener("click", () => {
     log("Large entity/doc set — edge computation may be slow.", "warn");
   EDGES = computeEdges(ENTITIES, dv);
   renderGraph();
+  populateGraphBox();
   log("Built "+EDGES.length+" candidate edges across "+ENTITIES.length+" entities.", "ok");
 });
 $("btnGraphSql").addEventListener("click", async () => {
@@ -1408,6 +1414,43 @@ $("btnGraphSql").addEventListener("click", async () => {
   const sql = graphScript(ENTITIES, EDGES, graphOpts(), parseFloat($("threshold").value));
   try { await navigator.clipboard.writeText(sql); log("Graph SQL copied — "+sql.length+" characters.", "ok"); }
   catch(e){ download("graph_"+stamp()+".sql", sql, "application/sql"); log("Clipboard blocked, downloaded the file instead.", "warn"); }
+});
+function graphSqlText(mode){
+  const opts = graphOpts(); const th = parseFloat($("threshold").value);
+  const parts = [];
+  const gd = graphDdl(opts), md = membershipDdl(opts);
+  if (gd){ parts.push(gd.nodes, gd.edges); } if (md) parts.push(md);
+  if (mode === "append"){
+    parts.push(...nodeInserts(ENTITIES, {...opts, upsert:true}));
+    parts.push(...edgeUpserts(EDGES, opts));
+  } else {
+    parts.push(...nodeInserts(ENTITIES, opts));
+    parts.push(...edgeInserts(EDGES, opts, th));
+  }
+  parts.push(createGraphSql(opts));
+  return parts.join(";\n\n")+";\n";
+}
+function populateGraphBox(){
+  if (!ENTITIES.length) return;
+  $("graphSqlBox").value = graphSqlText($("writeMode").value);
+}
+$("btnRunGraphSql").addEventListener("click", async () => {
+  const text = $("graphSqlBox").value.trim();
+  if (!text){ log("Nothing in the SQL box to run.", "warn"); return; }
+  const stmts = text.split(/;\s*(?:\n|$)/).map(s => s.trim()).filter(Boolean);
+  const bar = $("gbar"); bar.style.display = "block"; const fill = bar.querySelector("span");
+  const btn = $("btnRunGraphSql"); btn.disabled = true;
+  try {
+    for (let i=0;i<stmts.length;i++){
+      await ksql(stmts[i]);
+      fill.style.width = Math.round(100*(i+1)/stmts.length)+"%";
+      log("Ran statement "+(i+1)+"/"+stmts.length+".", "dim");
+    }
+    log("Ran "+stmts.length+" statements from the SQL box.", "ok");
+  } catch(e){
+    log("SQL box run failed: "+e.message, "err");
+    log("Statements before the failure were applied; fix and re-run (upserts converge).", "dim");
+  } finally { btn.disabled = false; setTimeout(()=>{ bar.style.display="none"; fill.style.width="0"; }, 1200); }
 });
 async function readRows(sql){ const r = await ksql(sql); return recordsToRows(r.records); }
 
@@ -1488,6 +1531,7 @@ async function appendBatch(){
     for (const s of edgeUpserts(EDGES, opts)) await ksql(s);
     step(ins.length+6, ins.length+6);
     renderGraph();
+    populateGraphBox();
     log("Updated "+EDGES.length+" edges ("+filterEdges(EDGES,th).length+" at/above "+th.toFixed(2)+"). Run CREATE GRAPH from the SQL box to build the solver graph.", "ok");
     LAST_TABLE = emb;
   } catch(e){
