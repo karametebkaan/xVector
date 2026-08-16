@@ -309,3 +309,81 @@ test("computeEdges now also returns sum_wv and sum_w", () => {
   assert.ok(typeof e[0].sum_wv === "number" && typeof e[0].sum_w === "number");
   assert.ok(Math.abs(e[0].sum_wv / e[0].sum_w - e[0].weight) < 1e-12);
 });
+
+test("graphDdl v2 adds block_key, edge accumulators, and primary keys", () => {
+  const d = core.graphDdl(OPTS);
+  assert.match(d.nodes, /block_key\s+CHAR\(64\)/);
+  assert.match(d.nodes, /PRIMARY KEY \(node\)/);
+  assert.match(d.edges, /sum_wv\s+DOUBLE/);
+  assert.match(d.edges, /sum_w\s+DOUBLE/);
+  assert.match(d.edges, /PRIMARY KEY \(node1, node2\)/);
+});
+
+test("membershipDdl emits node/doc_id/label bridge table", () => {
+  const d = core.membershipDdl(OPTS);
+  assert.match(d, /CREATE TABLE IF NOT EXISTS graph_membership_20260101/);
+  assert.match(d, /node\s+CHAR\(64\) NOT NULL/);
+  assert.match(d, /doc_id INT NOT NULL/);
+  assert.match(d, /label\s+VARCHAR\[\] NOT NULL/);
+  assert.equal(core.membershipDdl({...OPTS, createMode:"skip"}), null);
+});
+
+test("nodeInserts includes block_key and supports upsert hint", () => {
+  const ents = [{name:"Kaan Karamete",label:"Person",docIds:[1,2],count:3,aliases:["K Karamete","Kaan Karamete"],block_key:"karamete"}];
+  const plain = core.nodeInserts(ents, OPTS);
+  assert.match(plain[0], /INSERT INTO graph_nodes_20260101/);
+  assert.match(plain[0], /'karamete'/);
+  const up = core.nodeInserts(ents, {...OPTS, upsert:true});
+  assert.match(up[0], /INSERT INTO \/\* KI_HINT_UPDATE_ON_EXISTING_PK \*\/ graph_nodes_20260101/);
+});
+
+test("edgeUpserts stores all edges with accumulators and the upsert hint", () => {
+  const edges = [
+    {node1:"A",node2:"B",type:"person-person",weight:0.7,sum_wv:7,sum_w:10},
+    {node1:"A",node2:"C",type:"person-person",weight:0.2,sum_wv:2,sum_w:10},
+  ];
+  const s = core.edgeUpserts(edges, OPTS);
+  assert.match(s[0], /INSERT INTO \/\* KI_HINT_UPDATE_ON_EXISTING_PK \*\/ graph_edges_20260101/);
+  assert.match(s[0], /'A', 'B'/);
+  assert.match(s[0], /'A', 'C'/);        // no threshold filter — both kept
+  assert.match(s[0], /0\.7,\s*7,\s*10/);
+});
+
+test("membershipInserts builds typed rows", () => {
+  const s = core.membershipInserts([{node:"Kaan Karamete",docId:5,label:"Person"}], OPTS);
+  assert.match(s[0], /INSERT INTO graph_membership_20260101/);
+  assert.match(s[0], /'Kaan Karamete', 5, ARRAY\['Person'\]/);
+});
+
+test("knnQuery builds an index-backed top-k with a distance cutoff", () => {
+  const q = core.knnQuery("ki.emb", "[0.1,-0.2]", 20, 0.35, 7);
+  assert.match(q, /SELECT TOP 20 doc_id/);
+  assert.match(q, /\(1 - COSINE_DISTANCE\(embedding, '\[0.1,-0.2\]'\)\) AS cos/);
+  assert.match(q, /WHERE doc_id <> 7 AND COSINE_DISTANCE\(embedding, '\[0.1,-0.2\]'\) <= 0\.35/);
+  assert.match(q, /ORDER BY COSINE_DISTANCE\(embedding, '\[0.1,-0.2\]'\) ASC/);
+});
+
+test("inList quotes/escapes strings and passes ints; empty -> (NULL)", () => {
+  assert.equal(core.inList([1,2,3], "int"), "(1,2,3)");
+  assert.equal(core.inList(["O'Brien","Acme"], "str"), "('O''Brien','Acme')");
+  assert.equal(core.inList([], "str"), "(NULL)");
+});
+
+test("read-back queries target the right tables and filters", () => {
+  assert.equal(core.membershipQuery("m", [1,2]), "SELECT node, doc_id, label FROM m WHERE doc_id IN (1,2)");
+  assert.equal(core.edgeAccumQuery("e", ["A","B"]),
+    "SELECT node1, node2, sum_wv, sum_w FROM e WHERE node1 IN ('A','B') OR node2 IN ('A','B')");
+  assert.equal(core.nodeBlockQuery("n", ["karamete","acme"]),
+    "SELECT node, label, doc_ids, doc_count, aliases, block_key FROM n WHERE block_key IN ('karamete','acme')");
+});
+
+test("createGraphSql is runnable (uncommented) and aliases WEIGHT_VALUESPECIFIED", () => {
+  const s = core.createGraphSql(OPTS);
+  assert.match(s, /^CREATE UNDIRECTED GRAPH entity_graph_20260101/);
+  assert.ok(!/^--/.test(s));
+  assert.match(s, /\(1 - weight\) AS WEIGHT_VALUESPECIFIED FROM graph_edges_20260101/);
+});
+
+test("hnswIndexSql targets the embedding column", () => {
+  assert.equal(core.hnswIndexSql("ki.emb"), "ALTER TABLE ki.emb ADD HNSW INDEX (embedding)");
+});

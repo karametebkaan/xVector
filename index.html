@@ -889,46 +889,117 @@ function graphDdl(opts){
   if (opts.createMode === "skip") return null;
   const head = k => (opts.createMode === "replace" ? "CREATE OR REPLACE TABLE " : "CREATE TABLE IF NOT EXISTS ")+graphTableName(opts.prefix,k,opts.stamp,opts.schema);
   const nodes = head("nodes")+"\n(\n"+
-    "    node      CHAR(64) NOT NULL,\n"+
-    "    label     VARCHAR[] NOT NULL,\n"+
-    "    doc_ids   INT[] NOT NULL,\n"+
-    "    doc_count INT,\n"+
-    "    aliases   VARCHAR[],\n"+
-    "    created_at TIMESTAMP NOT NULL\n)";
+    "    node       CHAR(64) NOT NULL,\n"+
+    "    label      VARCHAR[] NOT NULL,\n"+
+    "    doc_ids    INT[] NOT NULL,\n"+
+    "    doc_count  INT,\n"+
+    "    aliases    VARCHAR[],\n"+
+    "    block_key  CHAR(64),\n"+
+    "    created_at TIMESTAMP NOT NULL,\n"+
+    "    PRIMARY KEY (node)\n)";
   const edges = head("edges")+"\n(\n"+
     "    node1  CHAR(64) NOT NULL,\n"+
     "    node2  CHAR(64) NOT NULL,\n"+
     "    label  VARCHAR[] NOT NULL,\n"+
     "    weight FLOAT NOT NULL,\n"+
-    "    created_at TIMESTAMP NOT NULL\n)";
+    "    sum_wv DOUBLE,\n"+
+    "    sum_w  DOUBLE,\n"+
+    "    created_at TIMESTAMP NOT NULL,\n"+
+    "    PRIMARY KEY (node1, node2)\n)";
   return { nodes, edges };
+}
+function membershipDdl(opts){
+  if (opts.createMode === "skip") return null;
+  const head = (opts.createMode === "replace" ? "CREATE OR REPLACE TABLE " : "CREATE TABLE IF NOT EXISTS ")+graphTableName(opts.prefix,"membership",opts.stamp,opts.schema);
+  return head+"\n(\n"+
+    "    node   CHAR(64) NOT NULL,\n"+
+    "    doc_id INT NOT NULL,\n"+
+    "    label  VARCHAR[] NOT NULL\n)";
 }
 function nodeInserts(entities, opts){
   const t = graphTableName(opts.prefix,"nodes",opts.stamp,opts.schema);
   const size = Math.max(1, opts.batchSize||50);
-  const cols = "(node, label, doc_ids, doc_count, aliases, created_at)";
+  const head = "INSERT INTO "+(opts.upsert ? "/* KI_HINT_UPDATE_ON_EXISTING_PK */ " : "")+t;
+  const cols = "(node, label, doc_ids, doc_count, aliases, block_key, created_at)";
   const out = [];
   for (let i=0;i<entities.length;i+=size){
     const rows = entities.slice(i,i+size).map(e =>
       "    ('"+esc(guardName(e.name))+"', "+arrayLit([e.label],"str")+", "+arrayLit(e.docIds,"int")+", "+
-      (parseInt(e.count,10)||e.docIds.length)+", "+arrayLit(e.aliases,"str")+", '"+opts.createdAt+"')");
-    out.push("INSERT INTO "+t+"\n"+cols+"\nVALUES\n"+rows.join(",\n"));
+      (parseInt(e.count,10)||e.docIds.length)+", "+arrayLit(e.aliases,"str")+", '"+
+      esc(guardName(e.block_key || blockKey(e.name, e.label)))+"', '"+opts.createdAt+"')");
+    out.push(head+"\n"+cols+"\nVALUES\n"+rows.join(",\n"));
   }
   return out;
 }
 function edgeInserts(edges, opts, threshold){
   const t = graphTableName(opts.prefix,"edges",opts.stamp,opts.schema);
   const size = Math.max(1, opts.batchSize||50);
-  const cols = "(node1, node2, label, weight, created_at)";
+  const cols = "(node1, node2, label, weight, sum_wv, sum_w, created_at)";
   const kept = edges.filter(e => e.weight >= threshold);
   const out = [];
   for (let i=0;i<kept.length;i+=size){
     const rows = kept.slice(i,i+size).map(e =>
-      "    ('"+esc(guardName(e.node1))+"', '"+esc(guardName(e.node2))+"', "+arrayLit([e.type],"str")+", "+num(e.weight)+", '"+opts.createdAt+"')");
+      "    ('"+esc(guardName(e.node1))+"', '"+esc(guardName(e.node2))+"', "+arrayLit([e.type],"str")+", "+
+      num(e.weight)+", "+num(e.sum_wv!=null?e.sum_wv:e.weight)+", "+num(e.sum_w!=null?e.sum_w:1)+", '"+opts.createdAt+"')");
     out.push("INSERT INTO "+t+"\n"+cols+"\nVALUES\n"+rows.join(",\n"));
   }
   return out;
 }
+function edgeUpserts(edges, opts){
+  const t = graphTableName(opts.prefix,"edges",opts.stamp,opts.schema);
+  const size = Math.max(1, opts.batchSize||50);
+  const cols = "(node1, node2, label, weight, sum_wv, sum_w, created_at)";
+  const out = [];
+  for (let i=0;i<edges.length;i+=size){
+    const rows = edges.slice(i,i+size).map(e =>
+      "    ('"+esc(guardName(e.node1))+"', '"+esc(guardName(e.node2))+"', "+arrayLit([e.type],"str")+", "+
+      num(e.weight)+", "+num(e.sum_wv)+", "+num(e.sum_w)+", '"+opts.createdAt+"')");
+    out.push("INSERT INTO /* KI_HINT_UPDATE_ON_EXISTING_PK */ "+t+"\n"+cols+"\nVALUES\n"+rows.join(",\n"));
+  }
+  return out;
+}
+function membershipInserts(rows, opts){
+  const t = graphTableName(opts.prefix,"membership",opts.stamp,opts.schema);
+  const size = Math.max(1, opts.batchSize||50);
+  const cols = "(node, doc_id, label)";
+  const out = [];
+  for (let i=0;i<rows.length;i+=size){
+    const vals = rows.slice(i,i+size).map(r =>
+      "    ('"+esc(guardName(r.node))+"', "+(r.docId|0)+", "+arrayLit([r.label],"str")+")");
+    out.push("INSERT INTO "+t+"\n"+cols+"\nVALUES\n"+vals.join(",\n"));
+  }
+  return out;
+}
+function knnQuery(table, vecLit, k, beta, excludeId){
+  const dist = "COSINE_DISTANCE(embedding, '"+vecLit+"')";
+  return "SELECT TOP "+(k|0)+" doc_id, (1 - "+dist+") AS cos\n"+
+         "FROM "+table+"\n"+
+         "WHERE doc_id <> "+(excludeId|0)+" AND "+dist+" <= "+num(beta)+"\n"+
+         "ORDER BY "+dist+" ASC";
+}
+function inList(values, kind){
+  if (!values || !values.length) return "(NULL)";
+  return "("+values.map(v => kind==="int" ? (v|0) : "'"+esc(String(v))+"'").join(",")+")";
+}
+function membershipQuery(table, docIds){
+  return "SELECT node, doc_id, label FROM "+table+" WHERE doc_id IN "+inList(docIds,"int");
+}
+function edgeAccumQuery(table, names){
+  const l = inList(names,"str");
+  return "SELECT node1, node2, sum_wv, sum_w FROM "+table+" WHERE node1 IN "+l+" OR node2 IN "+l;
+}
+function nodeBlockQuery(table, keys){
+  return "SELECT node, label, doc_ids, doc_count, aliases, block_key FROM "+table+" WHERE block_key IN "+inList(keys,"str");
+}
+function createGraphSql(opts){
+  const nt = graphTableName(opts.prefix,"nodes",opts.stamp,opts.schema);
+  const et = graphTableName(opts.prefix,"edges",opts.stamp,opts.schema);
+  return "CREATE UNDIRECTED GRAPH entity_graph_"+opts.stamp+" (\n"+
+         "  NODES => INPUT_TABLES((SELECT * FROM "+nt+")),\n"+
+         "  EDGES => INPUT_TABLES((SELECT node1, node2, label,\n"+
+         "                         (1 - weight) AS WEIGHT_VALUESPECIFIED FROM "+et+")))";
+}
+function hnswIndexSql(table){ return "ALTER TABLE "+table+" ADD HNSW INDEX (embedding)"; }
 function graphScript(entities, edges, opts, threshold){
   const parts = [];
   const d = graphDdl(opts);
@@ -936,12 +1007,8 @@ function graphScript(entities, edges, opts, threshold){
   parts.push(...nodeInserts(entities, opts));
   parts.push(...edgeInserts(edges, opts, threshold));
   let sql = parts.join(";\n\n")+";\n";
-  const nt = graphTableName(opts.prefix,"nodes",opts.stamp,opts.schema);
-  const et = graphTableName(opts.prefix,"edges",opts.stamp,opts.schema);
-  sql += "\n-- CREATE UNDIRECTED GRAPH entity_graph_"+opts.stamp+" (\n"+
-         "--   NODES => INPUT_TABLES((SELECT * FROM "+nt+")),\n"+
-         "--   EDGES => INPUT_TABLES((SELECT node1, node2, label,\n"+
-         "--                          (1 - weight) AS WEIGHT_VALUESPECIFIED FROM "+et+")));\n";
+  sql += "\n-- Runnable graph creation (also available in the editable SQL box):\n-- "+
+         createGraphSql(opts).replace(/\n/g, "\n-- ")+"\n";
   return sql;
 }
 /* CORE:END */
