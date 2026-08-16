@@ -30,17 +30,23 @@ Kinetica is configured to allow the origin.
 
 ## How the app is wired
 
-Four stages, each a small set of functions in the `<script>` block:
+Six stages, each a small set of functions in the `<script>` block:
 
 1. **Split** — `splitText()` cuts the textarea into documents (blank line / newline /
    custom delimiter / none) and applies a minimum-length filter.
 2. **Embed** — `embedLocal()` or `embedRemote()` returns `{vec: Float64Array(64), tokens}`
    per document. Results live in the module-level `DOCS` array as
    `{id, text, tokens, vec}`.
-3. **Emit SQL** — `ddl()` and `insertStatements()` build the statements. `fullScript()`
-   joins them for Copy SQL / Download .sql. These are the single source of truth for the
-   schema; `sql/schema.sql` is documentation, not the definition.
-4. **Send** — `ksql(statement, limit)` POSTs to `/execute/sql` and normalizes the response.
+3. **Extract entities** — `extractLocalMentions()` or `extractLLM()` returns mentions
+   `{surface, label, docId}`. These are disambiguated into canonical entities
+   `{name, label, docIds, count, aliases}` living in the `ENTITIES` array.
+4. **Build graph** — `computeEdges()` returns `{node1, node2, type, weight}` edges
+   stored in the `EDGES` array, filtered by a threshold slider at render time.
+5. **Emit SQL** — `ddl()`, `insertStatements()`, `graphDdl()`, `nodeInserts()`,
+   `edgeInserts()`, and `graphScript()` build the statements. `fullScript()` joins them
+   for Copy SQL / Download .sql. These are the single source of truth for the schema;
+   `sql/schema.sql` is documentation, not the definition.
+6. **Send** — `ksql(statement, limit)` POSTs to `/execute/sql` and normalizes the response.
 
 `DIM` is a top-level constant set to 64. It is deliberately not a UI field — the table name
 and the `VECTOR(64)` column would drift out of sync with previously written tables.
@@ -62,6 +68,58 @@ OpenAI-compatible `POST /v1/embeddings` with `{model, input: [...]}`, batched. H
 `data[].embedding` or a bare array. When the model returns more than 64 dims, `reduceVec()`
 either truncates (correct for Matryoshka models like `text-embedding-3-*`) or applies a
 seeded random projection (better for everything else).
+
+### Entity extraction and disambiguation
+
+The local heuristic extractor, `extractLocalMentions()`, is a stand-in for real NER, exactly
+as the local hash embedder stands in for a real model. It parses Capitalized noun phrases,
+strips titles and articles, and classifies each span as Person (2+ tokens or title-prefixed)
+or Business (contains biz-word suffix or 2+ letter acronym). Results are mentions
+`{surface, label, docId}` — many variants of the same entity across documents.
+
+Three disambiguation modes fold these into canonical entities `{name, label, docIds, count, aliases}`:
+
+- **Ad-hoc heuristic** (default) — persons merge by surname compatibility and given-name
+  initials; businesses merge by suffix-stripped core. Merged variants appear as aliases, and
+  the longest variant becomes the canonical name.
+- **None** (exact-match) — only identical-cased strings merge; each variant is a separate entity.
+- **External API** — `resolveApi()` POSTs to a custom endpoint and falls back to heuristic on error.
+
+### Graph edges and tables
+
+Edge weights use True-IDW per document pair: given cos = dot(a,b), d = 1−cos, w = 1/(ε+d)
+with ε=10⁻⁶, and v = (1+cos)/2, the edge weight is Σ(w·v)/Σ(w) ∈ (0,1]. Same-document
+co-occurrence yields weight ≈ 1 (documents are identical vectors). The threshold slider
+(default 0.5) filters edges at render/store time only; it does not affect weight computation.
+
+The grammar-aligned tables match Kinetica's ARRAY and CHAR types:
+- **Node table** `graph_nodes_<datestamp>`: `node CHAR(64)` (canonical entity name), `label
+  VARCHAR[]` (ARRAY['Person'] or ARRAY['Business']), `doc_ids INT[]` (documents where the
+  entity appears, key for post-join), `doc_count INT`, `aliases VARCHAR[]` (merged variants),
+  `created_at TIMESTAMP`.
+- **Edge table** `graph_edges_<datestamp>`: `node1` and `node2 CHAR(64)` (canonical names),
+  `label VARCHAR[]` (ARRAY['person-business'] | ARRAY['person-person'] | ARRAY['business-business']),
+  `weight FLOAT` (IDW strength), `created_at TIMESTAMP`.
+
+The `doc_ids INT[]` column in the node table enables the post-join via
+`ARRAY_CONTAINS(n.doc_ids, e.doc_id)`, reconnecting entities to their source documents.
+
+`graphDdl()`, `nodeInserts()`, `edgeInserts()`, and `graphScript()` emit the full DDL and
+INSERT statements. `CREATE GRAPH` is emitted only as a commented trailer, aliasing
+`(1 - weight) AS WEIGHT_VALUESPECIFIED` to convert edge strength to solver cost.
+
+### Palette extension
+
+Colors extend the existing per-vector strip convention. Indigo `--signal` represents People
+(Person labels), and amber `--warm` represents Business (Business labels). These are used
+in the Entities panel to visually distinguish entity types.
+
+### Testing the pure core functions
+
+`scripts/test_graph.mjs` (`node --test scripts/test_graph.mjs`) covers the pure core
+functions — `extractLocalMentions()`, `mergeMentions()`, `computeEdges()`, and the SQL
+emitters — which are wrapped in `/* CORE:BEGIN */ … /* CORE:END */` markers so the
+stdlib-only harness can extract and eval them.
 
 ## Kinetica specifics worth not re-deriving
 

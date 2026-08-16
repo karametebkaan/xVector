@@ -1261,9 +1261,12 @@ $("btnSample").addEventListener("click", () => {
     "A vector column can be declared with NORMALIZE, which gives every inserted vector an L2 magnitude of one. That makes cosine comparisons cheaper and keeps distances consistent across batches.",
     "The espresso machine needs descaling every two months. Hard water shortens the interval, and the group head gasket should be replaced once a year.",
     "HNSW indexes update automatically as rows change, while CAGRA indexes need a manual refresh. Pick HNSW when the table is written continuously.",
-    "Sourdough starter doubles in about six hours at room temperature. Feed it equal weights of flour and water, and discard half before each feed."
+    "Sourdough starter doubles in about six hours at room temperature. Feed it equal weights of flour and water, and discard half before each feed.",
+    "Dr Kaan Karamete leads the graph analytics team at Acme Corp, where his group ships the vector search features the company sells to its largest customers.",
+    "Earlier, K Karamete taught at the University of Texas before Acme Inc recruited the entire lab. Acme Corp still funds two graduate fellowships at the university.",
+    "The University of Texas and Acme Corp announced a joint institute this spring; Kaan Karamete will direct it, splitting his week between the campus and the company."
   ].join("\n\n");
-  log("Sample loaded — three Kinetica paragraphs and two unrelated ones, so the distances mean something.");
+  log("Sample loaded — Kinetica notes, two unrelated paragraphs, and three entity-rich paragraphs for extraction and the graph.");
 });
 
 $("splitMode").dispatchEvent(new Event("change"));
