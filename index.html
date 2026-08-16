@@ -739,6 +739,78 @@ function computeEdges(entities, docVec, eps){
 function filterEdges(edges, threshold){ return edges.filter(e => e.weight >= threshold); }
 /* CORE:END */
 
+/* CORE:BEGIN */
+function arrayLit(items, kind){
+  if (!items || !items.length) return "ARRAY[]";
+  const parts = items.map(x => kind === "int" ? String(x|0) : "'"+esc(String(x))+"'");
+  return "ARRAY["+parts.join(",")+"]";
+}
+function guardName(name){ const s = String(name); return s.length > 64 ? s.slice(0,64) : s; }
+function graphTableName(prefix, kind, stamp, schema){
+  const t = prefix+"_"+kind+"_"+stamp;
+  return schema ? schema+"."+t : t;
+}
+function graphDdl(opts){
+  if (opts.createMode === "skip") return null;
+  const head = k => (opts.createMode === "replace" ? "CREATE OR REPLACE TABLE " : "CREATE TABLE IF NOT EXISTS ")+graphTableName(opts.prefix,k,opts.stamp,opts.schema);
+  const nodes = head("nodes")+"\n(\n"+
+    "    node      CHAR(64) NOT NULL,\n"+
+    "    label     VARCHAR[] NOT NULL,\n"+
+    "    doc_ids   INT[] NOT NULL,\n"+
+    "    doc_count INT,\n"+
+    "    aliases   VARCHAR[],\n"+
+    "    created_at TIMESTAMP NOT NULL\n)";
+  const edges = head("edges")+"\n(\n"+
+    "    node1  CHAR(64) NOT NULL,\n"+
+    "    node2  CHAR(64) NOT NULL,\n"+
+    "    label  VARCHAR[] NOT NULL,\n"+
+    "    weight FLOAT NOT NULL,\n"+
+    "    created_at TIMESTAMP NOT NULL\n)";
+  return { nodes, edges };
+}
+function nodeInserts(entities, opts){
+  const t = graphTableName(opts.prefix,"nodes",opts.stamp,opts.schema);
+  const size = Math.max(1, opts.batchSize||50);
+  const cols = "(node, label, doc_ids, doc_count, aliases, created_at)";
+  const out = [];
+  for (let i=0;i<entities.length;i+=size){
+    const rows = entities.slice(i,i+size).map(e =>
+      "    ('"+esc(guardName(e.name))+"', "+arrayLit([e.label],"str")+", "+arrayLit(e.docIds,"int")+", "+
+      (e.count||e.docIds.length)+", "+arrayLit(e.aliases,"str")+", '"+opts.createdAt+"')");
+    out.push("INSERT INTO "+t+"\n"+cols+"\nVALUES\n"+rows.join(",\n"));
+  }
+  return out;
+}
+function edgeInserts(edges, opts, threshold){
+  const t = graphTableName(opts.prefix,"edges",opts.stamp,opts.schema);
+  const size = Math.max(1, opts.batchSize||50);
+  const cols = "(node1, node2, label, weight, created_at)";
+  const kept = edges.filter(e => e.weight >= threshold);
+  const out = [];
+  for (let i=0;i<kept.length;i+=size){
+    const rows = kept.slice(i,i+size).map(e =>
+      "    ('"+esc(guardName(e.node1))+"', '"+esc(guardName(e.node2))+"', "+arrayLit([e.type],"str")+", "+num(e.weight)+", '"+opts.createdAt+"')");
+    out.push("INSERT INTO "+t+"\n"+cols+"\nVALUES\n"+rows.join(",\n"));
+  }
+  return out;
+}
+function graphScript(entities, edges, opts, threshold){
+  const parts = [];
+  const d = graphDdl(opts);
+  if (d){ parts.push(d.nodes, d.edges); }
+  parts.push(...nodeInserts(entities, opts));
+  parts.push(...edgeInserts(edges, opts, threshold));
+  let sql = parts.join(";\n\n")+";\n";
+  const nt = graphTableName(opts.prefix,"nodes",opts.stamp,opts.schema);
+  const et = graphTableName(opts.prefix,"edges",opts.stamp,opts.schema);
+  sql += "\n-- CREATE UNDIRECTED GRAPH entity_graph_"+opts.stamp+" (\n"+
+         "--   NODES => INPUT_TABLES((SELECT * FROM "+nt+")),\n"+
+         "--   EDGES => INPUT_TABLES((SELECT node1, node2, label,\n"+
+         "--                          (1 - weight) AS WEIGHT_VALUESPECIFIED FROM "+et+")));\n";
+  return sql;
+}
+/* CORE:END */
+
 function vecLiteral(v){
   const p = [];
   for (let i=0;i<v.length;i++) p.push(num(v[i]));

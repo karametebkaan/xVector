@@ -145,3 +145,44 @@ test("filterEdges keeps weight >= threshold", () => {
   const edges = [{node1:"A",node2:"B",type:"x",weight:0.7},{node1:"A",node2:"C",type:"x",weight:0.4}];
   assert.equal(core.filterEdges(edges, 0.5).length, 1);
 });
+
+const OPTS = {prefix:"graph", stamp:"20260101", schema:"", createMode:"ifnot", batchSize:50, createdAt:"2026-01-01 00:00:00"};
+
+test("arrayLit builds typed literals and escapes strings", () => {
+  assert.equal(core.arrayLit(["Person"], "str"), "ARRAY['Person']");
+  assert.equal(core.arrayLit([1,3,5], "int"), "ARRAY[1,3,5]");
+  assert.equal(core.arrayLit(["O'Brien"], "str"), "ARRAY['O''Brien']");
+});
+
+test("graphDdl emits grammar-aligned node/edge tables", () => {
+  const d = core.graphDdl(OPTS);
+  assert.match(d.nodes, /CREATE TABLE IF NOT EXISTS graph_nodes_20260101/);
+  assert.match(d.nodes, /node\s+CHAR\(64\) NOT NULL/);
+  assert.match(d.nodes, /label\s+VARCHAR\[\] NOT NULL/);
+  assert.match(d.nodes, /doc_ids\s+INT\[\] NOT NULL/);
+  assert.match(d.edges, /node1\s+CHAR\(64\) NOT NULL/);
+  assert.match(d.edges, /weight\s+FLOAT NOT NULL/);
+  assert.equal(core.graphDdl({...OPTS, createMode:"skip"}), null);
+});
+
+test("nodeInserts and edgeInserts produce ARRAY literals and filtered rows", () => {
+  const ents = [{name:"Kaan Karamete",label:"Person",docIds:[1,2],count:3,aliases:["K Karamete","Kaan Karamete"]}];
+  const ni = core.nodeInserts(ents, OPTS);
+  assert.match(ni[0], /INSERT INTO graph_nodes_20260101/);
+  assert.match(ni[0], /ARRAY\['Person'\]/);
+  assert.match(ni[0], /ARRAY\[1,2\]/);
+  assert.match(ni[0], /'Kaan Karamete'/);
+
+  const edges = [{node1:"A",node2:"B",type:"person-person",weight:0.73},{node1:"A",node2:"C",type:"person-person",weight:0.2}];
+  const ei = core.edgeInserts(edges, OPTS, 0.5);
+  assert.equal(ei.length, 1);              // one batch
+  assert.match(ei[0], /ARRAY\['person-person'\]/);
+  assert.match(ei[0], /0\.73/);
+  assert.ok(!/'C'/.test(ei[0]));           // below-threshold edge dropped
+});
+
+test("graphScript includes commented CREATE GRAPH trailer", () => {
+  const s = core.graphScript([{name:"A",label:"Person",docIds:[1],count:1,aliases:["A"]}], [], OPTS, 0.5);
+  assert.match(s, /-- CREATE UNDIRECTED GRAPH entity_graph_20260101/);
+  assert.match(s, /\(1 - weight\) AS WEIGHT_VALUESPECIFIED/);
+});
