@@ -94,9 +94,10 @@ are mentions `{surface, label, docId}` — many variants of the same entity acro
 
 Three disambiguation modes fold these into canonical entities `{name, label, docIds, count, aliases}`:
 
-- **Ad-hoc heuristic** (default) — within each type, entities merge by surname compatibility
-  (People), suffix-stripped core (Business), or keyword-stripped core (Organization/Facility/Location).
-  Merged variants appear as aliases, and the longest variant becomes the canonical name.
+- **Ad-hoc heuristic** (default) — within each type, entities merge by surname plus given-initial
+  matching (People), suffix-stripped and article-stripped core (Business and Organization, the `core`
+  strategy), or normalized-name equality (Facility and Location, the `norm` strategy). Merged variants
+  appear as aliases, and the longest variant becomes the canonical name.
 - **None** (exact-match) — only identical-cased strings merge; each variant is a separate entity.
 - **External API** — `resolveApi()` POSTs to a custom endpoint and falls back to heuristic on error.
 

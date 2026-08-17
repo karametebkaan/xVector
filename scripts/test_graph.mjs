@@ -297,6 +297,17 @@ test("mergeMentions merges within a type by strategy, never across types", () =>
   assert.equal(loc.length, 1);
 });
 
+test("core strategy merges an article-differing organization", () => {
+  const m = core.mergeMentions([
+    {surface:"State Department",label:"Organization",docId:1},
+    {surface:"the State Department",label:"Organization",docId:2}], "heuristic");
+  assert.equal(m.length, 1);
+});
+
+test("blockKey ignores a leading article for core types", () => {
+  assert.equal(core.blockKey("the State Department","Organization"), core.blockKey("State Department","Organization"));
+});
+
 test("sameEntity matches person variants and business cores, rejects different people", () => {
   assert.equal(core.sameEntity("People", "Kaan Karamete", "K Karamete"), true);
   assert.equal(core.sameEntity("People", "Jane Smith", "John Smith"), false);
@@ -534,6 +545,21 @@ test("buildRelationEdges keeps one row per (pair, predicate)", () => {
   ];
   const r = core.buildRelationEdges(rels, entities);
   assert.equal(r.edges.length, 2);
+});
+
+test("buildRelationEdges does not collide space-containing node names", () => {
+  const entities = [
+    {name:"A B", label:"Business", aliases:["A B"]},
+    {name:"C",   label:"Business", aliases:["C"]},
+    {name:"A",   label:"Business", aliases:["A"]},
+    {name:"B C", label:"Business", aliases:["B C"]},
+  ];
+  const rels = [
+    {subject:"A B", predicate:"OWNS", object:"C",   docIds:[1]},
+    {subject:"A",   predicate:"OWNS", object:"B C", docIds:[2]},
+  ];
+  const r = core.buildRelationEdges(rels, entities);
+  assert.equal(r.edges.length, 2);   // two distinct edges, not one collided row
 });
 
 test("EXTRACT_SCHEMA enumerates the five types and the predicate set", () => {

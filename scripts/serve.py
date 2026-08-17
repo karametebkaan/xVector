@@ -14,6 +14,7 @@ Standard library only. No dependencies, no install.
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.error
@@ -115,6 +116,8 @@ def run_gemini(prompt, model, project, region="global", timeout=180, _token=None
     token = _token if _token is not None else _gcloud_token()
     if not token:
         return {"status": "ERROR", "message": "no gcloud token — run `gcloud auth login`"}
+    if not re.match(r"^[\w.-]+$", model or ""):
+        return {"status": "ERROR", "message": "invalid model"}
     loc = region or "global"
     host = "aiplatform.googleapis.com" if loc == "global" else "%s-aiplatform.googleapis.com" % loc
     url = ("https://%s/v1/projects/%s/locations/%s/publishers/google/models/%s:generateContent"

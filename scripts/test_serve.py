@@ -136,6 +136,17 @@ class RunGemini(unittest.TestCase):
         self.assertEqual(r["status"], "ERROR")
         self.assertIn("not JSON", r["message"])
 
+    def test_invalid_model_rejected_before_post(self):
+        called = {"n": 0}
+        def post(url, body, token, timeout):
+            called["n"] += 1
+            return self._gemini_body("{}")
+        for bad in ("a/b", "../evil"):
+            r = serve.run_gemini("p", bad, "proj", "global", _token="t", _post=post)
+            self.assertEqual(r["status"], "ERROR")
+            self.assertIn("invalid model", r["message"])
+        self.assertEqual(called["n"], 0)   # no upstream request attempted
+
 
 if __name__ == "__main__":
     unittest.main()

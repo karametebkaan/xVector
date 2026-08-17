@@ -858,7 +858,7 @@ function personName(surface){
   return { given: t.slice(0,-1), sur: (t[t.length-1]||"").toLowerCase() };
 }
 function businessCore(surface){
-  const t = surface.toLowerCase().replace(/[.,]/g,"").split(/\s+/).filter(w => !BIZ_SUFFIX.has(w));
+  const t = surface.toLowerCase().replace(/[.,]/g,"").replace(/^(the|a|an)\s+/,"").split(/\s+/).filter(w => !BIZ_SUFFIX.has(w));
   return t.join(" ");
 }
 function longest(surfaces){
@@ -1020,7 +1020,7 @@ function buildRelationEdges(relations, entities){
     if (!s || !o){ dropped++; continue; }
     if (s.name === o.name){ dropped++; continue; }
     const predicate = normPredicate(r.predicate);
-    const key = s.name+" "+o.name+" "+predicate;
+    const key = s.name+"\u0000"+o.name+"\u0000"+predicate;
     if (acc.has(key)) continue;
     acc.set(key, {node1:s.name, node2:o.name, label:predicate, edge_kind:"relation",
       weight:1.0, sum_wv:1.0, sum_w:1.0, docIds:(r.docIds||[]).slice()});
@@ -1763,9 +1763,9 @@ async function appendBatch(){
     const accum = new Map();
     if (names.length){
       const ea = await readRows(edgeAccumQuery(graphTableName(opts.prefix,"edges",opts.stamp,opts.schema), names));
-      if (ea) for (const [n1,n2,el,swv,sw] of ea.rows) accum.set(n1+" "+n2+" "+el, {sum_wv:swv||0, sum_w:sw||0});
+      if (ea) for (const [n1,n2,el,swv,sw] of ea.rows) accum.set(n1+"\u0000"+n2+"\u0000"+el, {sum_wv:swv||0, sum_w:sw||0});
     }
-    EDGES = layerDeltas.map(e => { const m = mergeEdgeAccum(accum.get(e.node1+" "+e.node2+" "+e.label), {d_wv:e.d_wv, d_w:e.d_w});
+    EDGES = layerDeltas.map(e => { const m = mergeEdgeAccum(accum.get(e.node1+"\u0000"+e.node2+"\u0000"+e.label), {d_wv:e.d_wv, d_w:e.d_w});
       return {node1:e.node1, node2:e.node2, label:e.label, edge_kind:e.edge_kind, weight:m.weight, sum_wv:m.sum_wv, sum_w:m.sum_w}; });
     EDGES.sort((a,b) => b.weight - a.weight);
     for (const s of edgeUpserts(EDGES, opts)) await ksql(s);
