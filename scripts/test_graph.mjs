@@ -114,17 +114,17 @@ test("givenCompatible handles initials and equality", () => {
 
 test("mergeMentions none keeps variants distinct", () => {
   const e = core.mergeMentions([
-    {surface:"Kaan Karamete",label:"Person",docId:1},
-    {surface:"K Karamete",label:"Person",docId:2},
+    {surface:"Kaan Karamete",label:"People",docId:1},
+    {surface:"K Karamete",label:"People",docId:2},
   ], "none");
   assert.equal(e.length, 2);
 });
 
 test("mergeMentions heuristic merges person variants", () => {
   const e = core.mergeMentions([
-    {surface:"Kaan Karamete",label:"Person",docId:1},
-    {surface:"K Karamete",label:"Person",docId:2},
-    {surface:"Kaan Karamete",label:"Person",docId:2},
+    {surface:"Kaan Karamete",label:"People",docId:1},
+    {surface:"K Karamete",label:"People",docId:2},
+    {surface:"Kaan Karamete",label:"People",docId:2},
   ], "heuristic");
   assert.equal(e.length, 1);
   assert.equal(e[0].name, "Kaan Karamete");
@@ -140,8 +140,8 @@ test("mergeMentions heuristic merges business by core, not different people", ()
   ], "heuristic");
   assert.equal(biz.length, 1);
   const ppl = core.mergeMentions([
-    {surface:"Jane Smith",label:"Person",docId:1},
-    {surface:"John Smith",label:"Person",docId:2},
+    {surface:"Jane Smith",label:"People",docId:1},
+    {surface:"John Smith",label:"People",docId:2},
   ], "heuristic");
   assert.equal(ppl.length, 2);
 });
@@ -258,23 +258,51 @@ test("embDdl adds PRIMARY KEY on doc_id and honors NORMALIZE", () => {
 });
 
 test("blockKey: person -> surname, business -> suffix-stripped core", () => {
-  assert.equal(core.blockKey("Kaan Karamete", "Person"), "karamete");
-  assert.equal(core.blockKey("K Karamete", "Person"), "karamete");
-  assert.equal(core.blockKey("Obama", "Person"), "obama");
+  assert.equal(core.blockKey("Kaan Karamete", "People"), "karamete");
+  assert.equal(core.blockKey("K Karamete", "People"), "karamete");
+  assert.equal(core.blockKey("Obama", "People"), "obama");
   assert.equal(core.blockKey("Acme Corp", "Business"), "acme");
   assert.equal(core.blockKey("Acme Inc", "Business"), "acme");
   assert.equal(core.blockKey("University of Texas", "Business"), "university of texas");
 });
 
+test("blockKey uses the strategy per type", () => {
+  assert.equal(core.blockKey("Kaan Karamete", "People"), "karamete");   // person -> surname
+  assert.equal(core.blockKey("Acme Corp", "Business"), "acme");         // core -> suffix-stripped
+  assert.equal(core.blockKey("State Department", "Organization"), "state department"); // core, no suffix -> normalized
+  assert.equal(core.blockKey("JFK Airport", "Facility"), "jfk airport");// norm
+  assert.equal(core.blockKey("The Brooklyn", "Location"), "brooklyn");  // norm strips article
+});
+
+test("mergeMentions merges within a type by strategy, never across types", () => {
+  const biz = core.mergeMentions([
+    {surface:"Acme Corp",label:"Business",docId:1},
+    {surface:"Acme Inc", label:"Business",docId:2},
+  ], "heuristic");
+  assert.equal(biz.length, 1);
+  // same core string but different labels must NOT merge
+  const mixed = core.mergeMentions([
+    {surface:"Acme",label:"Business",docId:1},
+    {surface:"Acme",label:"Organization",docId:2},
+  ], "heuristic");
+  assert.equal(mixed.length, 2);
+  // two Location surfaces differing only by article merge
+  const loc = core.mergeMentions([
+    {surface:"Brooklyn",label:"Location",docId:1},
+    {surface:"the Brooklyn",label:"Location",docId:2},
+  ], "heuristic");
+  assert.equal(loc.length, 1);
+});
+
 test("sameEntity matches person variants and business cores, rejects different people", () => {
-  assert.equal(core.sameEntity("Person", "Kaan Karamete", "K Karamete"), true);
-  assert.equal(core.sameEntity("Person", "Jane Smith", "John Smith"), false);
+  assert.equal(core.sameEntity("People", "Kaan Karamete", "K Karamete"), true);
+  assert.equal(core.sameEntity("People", "Jane Smith", "John Smith"), false);
   assert.equal(core.sameEntity("Business", "Acme Corp", "Acme Inc"), true);
 });
 
 test("resolveIncremental merges a new variant into an existing block, keeping the PK name", () => {
-  const existing = [{name:"Kaan Karamete", label:"Person", docIds:[1], aliases:["Kaan Karamete"], count:1, block_key:"karamete"}];
-  const r = core.resolveIncremental([{surface:"K Karamete", label:"Person", docId:5}], existing);
+  const existing = [{name:"Kaan Karamete", label:"People", docIds:[1], aliases:["Kaan Karamete"], count:1, block_key:"karamete"}];
+  const r = core.resolveIncremental([{surface:"K Karamete", label:"People", docId:5}], existing);
   assert.equal(r.nodeUpserts.length, 1);
   const e = r.nodeUpserts[0];
   assert.equal(e.name, "Kaan Karamete");              // PK name preserved
@@ -282,12 +310,12 @@ test("resolveIncremental merges a new variant into an existing block, keeping th
   assert.ok(e.aliases.includes("K Karamete"));
   assert.equal(e.count, 2);
   assert.equal(e.block_key, "karamete");
-  assertNonStrict.deepEqual(r.membership, [{node:"Kaan Karamete", docId:5, label:"Person"}]);
+  assertNonStrict.deepEqual(r.membership, [{node:"Kaan Karamete", docId:5, label:"People"}]);
 });
 
 test("resolveIncremental spawns a new node when nothing in the block matches", () => {
-  const existing = [{name:"Jane Smith", label:"Person", docIds:[2], aliases:["Jane Smith"], count:1, block_key:"smith"}];
-  const r = core.resolveIncremental([{surface:"John Smith", label:"Person", docId:7}], existing);
+  const existing = [{name:"Jane Smith", label:"People", docIds:[2], aliases:["Jane Smith"], count:1, block_key:"smith"}];
+  const r = core.resolveIncremental([{surface:"John Smith", label:"People", docId:7}], existing);
   assert.equal(r.nodeUpserts.length, 1);
   assert.equal(r.nodeUpserts[0].name, "John Smith");
   assert.equal(r.nodeUpserts[0].block_key, "smith");

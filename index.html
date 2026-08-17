@@ -835,7 +835,7 @@ const BIZ_SUFFIX = new Set(["inc","llc","ltd","corp","corporation","co","company
 
 function normalizeName(name){
   return String(name).trim().replace(/\s+/g," ").replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu,"")
-    .replace(/'s$/i,"").replace(/[.,]/g,"").toLowerCase();
+    .replace(/'s$/i,"").replace(/[.,]/g,"").toLowerCase().replace(/^(the|a|an)\s+/,"");
 }
 function givenCompatible(a, b){
   a = a.toLowerCase().replace(/\.$/,""); b = b.toLowerCase().replace(/\.$/,"");
@@ -856,14 +856,16 @@ function longest(surfaces){
   return surfaces.slice().sort((x,y) => y.split(/\s+/).length - x.split(/\s+/).length || y.length - x.length)[0];
 }
 function sameEntity(label, surfaceA, surfaceB){
-  if (label === "Person"){
+  const strat = (TYPES[label] && TYPES[label].strategy) || "norm";
+  if (strat === "person"){
     const a = personName(surfaceA), b = personName(surfaceB);
     if (a.sur !== b.sur) return false;
     const n = Math.min(a.given.length, b.given.length);
     for (let i=0;i<n;i++) if (!givenCompatible(a.given[i], b.given[i])) return false;
     return true;
   }
-  return businessCore(surfaceA) === businessCore(surfaceB);
+  if (strat === "core") return businessCore(surfaceA) === businessCore(surfaceB);
+  return normalizeName(surfaceA) === normalizeName(surfaceB);   // norm
 }
 function mergeMentions(mentions, mode){
   // group into buckets of arrays of mentions
@@ -880,11 +882,7 @@ function mergeMentions(mentions, mode){
       else buckets.push({ label: m.label, key, items: [m] });
       continue;
     }
-    if (m.label === "Person"){
-      put(m, b => sameEntity("Person", b.items[0].surface, m.surface));
-    } else {
-      put(m, b => sameEntity("Business", b.items[0].surface, m.surface));
-    }
+    put(m, b => sameEntity(m.label, b.items[0].surface, m.surface));
   }
   return buckets.map(b => {
     const surfaces = b.items.map(x => x.surface);
@@ -894,8 +892,10 @@ function mergeMentions(mentions, mode){
   });
 }
 function blockKey(name, label){
-  if (label === "Business") return businessCore(name);
-  return personName(name).sur;
+  const strat = (TYPES[label] && TYPES[label].strategy) || "norm";
+  if (strat === "person") return personName(name).sur;
+  if (strat === "core")   return businessCore(name);
+  return normalizeName(name);   // norm
 }
 function unionSorted(a, b){ return [...new Set([...(a||[]), ...(b||[])])]; }
 
