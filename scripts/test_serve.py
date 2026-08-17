@@ -93,5 +93,49 @@ class RunClaude(unittest.TestCase):
         self.assertIn("not found", r["message"])
 
 
+class RunGemini(unittest.TestCase):
+    def _gemini_body(self, text):
+        return json.dumps({"candidates": [{"content": {"parts": [{"text": text}]}}]}).encode()
+
+    def test_success_parses_content_json(self):
+        captured = {}
+        def post(url, body, token, timeout):
+            captured["url"] = url; captured["token"] = token
+            return self._gemini_body('{"entities":[{"name":"Kaan","label":"People"}],"relations":[]}')
+        r = serve.run_gemini("prompt", "gemini-2.5-flash", "proj-x", "global",
+                             _token="tok-123", _post=post)
+        self.assertEqual(r["status"], "OK")
+        self.assertEqual(r["data"]["entities"][0]["name"], "Kaan")
+        self.assertIn("aiplatform.googleapis.com", captured["url"])
+        self.assertIn("projects/proj-x/locations/global", captured["url"])
+        self.assertIn("gemini-2.5-flash:generateContent", captured["url"])
+        self.assertEqual(captured["token"], "tok-123")
+
+    def test_regional_host(self):
+        def post(url, body, token, timeout):
+            self.assertTrue(url.startswith("https://us-central1-aiplatform.googleapis.com/"))
+            return self._gemini_body("{}")
+        serve.run_gemini("p", "m", "proj", "us-central1", _token="t", _post=post)
+
+    def test_no_token_returns_error(self):
+        r = serve.run_gemini("p", "m", "proj", "global", _token="", _post=lambda *a: b"{}")
+        self.assertEqual(r["status"], "ERROR")
+        self.assertIn("gcloud", r["message"])
+
+    def test_google_error_body_surfaces_message(self):
+        def post(url, body, token, timeout):
+            return json.dumps({"error": {"message": "permission denied"}}).encode()
+        r = serve.run_gemini("p", "m", "proj", "global", _token="t", _post=post)
+        self.assertEqual(r["status"], "ERROR")
+        self.assertIn("permission denied", r["message"])
+
+    def test_content_not_json_returns_error(self):
+        def post(url, body, token, timeout):
+            return self._gemini_body("this is not json")
+        r = serve.run_gemini("p", "m", "proj", "global", _token="t", _post=post)
+        self.assertEqual(r["status"], "ERROR")
+        self.assertIn("not JSON", r["message"])
+
+
 if __name__ == "__main__":
     unittest.main()
