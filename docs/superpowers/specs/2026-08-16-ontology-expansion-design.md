@@ -2,7 +2,8 @@
 
 **Date:** 2026-08-16
 **Branch:** `feature/incremental-append-knn`
-**Status:** approved design, ready for implementation plan
+**Status:** revised (Claude + Gemini providers added; Ollama extraction
+retired) — awaiting user re-review before implementation plan
 **Predecessor:** SP1 (native Ollama provider) — complete, merge-ready
 **Roadmap:** sub-project 2 of 3 (Ollama provider → **ontology expansion** → kNN finish)
 
@@ -38,8 +39,12 @@ Out of scope (later sub-projects / follow-ups):
 - SQL escaping via `esc()`; floats via `num()` (6 decimals).
 - Pure DOM-free logic lives inside `/* CORE:BEGIN … CORE:END */` so
   `scripts/test_graph.mjs` (`node --test`) can extract and eval it.
-- LLM structured output uses schema-constrained `format` (Ollama) /
-  `response_format` (OpenAI), matching the SP1 hardening.
+- LLM structured output is schema-constrained per provider (Claude
+  `--json-schema`, Gemini `responseSchema`/`responseMimeType`), matching the
+  SP1 hardening; all providers share the same post-processing guards.
+- Credentials never reach the browser. Cloud LLM calls go through same-origin
+  proxy routes in `scripts/serve.py` (stdlib-only: `subprocess` + `urllib`),
+  mirroring the existing `/kinetica` and `/ollama` routes.
 - Canonical-name-is-stable rule (append mode): a node's PK name never changes;
   new variants become aliases.
 
@@ -95,10 +100,67 @@ colors each entity by its type via `TYPES[label].colorVar`.
 
 ## 2. Extraction
 
-### 2.1 LLM path — single combined call (`extractLLM`)
+### 2.1 LLM providers and transport
 
-One schema-constrained `/api/chat` (Ollama) or `/v1/chat/completions`
-(OpenAI-compatible) call returns BOTH entities and relations:
+The real-LLM extractor runs against a hosted Claude or Gemini model, reached
+through same-origin proxy routes in `scripts/serve.py` so no credential ever
+touches the browser. Both are stdlib-only. The Ollama *extraction* provider
+is **retired** (see §2.1.3); Ollama remains an *embeddings* provider (SP1),
+which is untouched by this spec.
+
+#### 2.1.1 Claude provider — `/claude` route
+
+serve.py's `/claude` handler shells out (stdlib `subprocess`) to the local
+`claude` CLI using its stored login (Vertex — no API key):
+
+```
+claude -p --output-format json --json-schema <INLINE_JSON_SCHEMA> --model <id>
+```
+
+with the prompt on **stdin** and a timeout. The CLI emits one JSON object on
+stdout whose `structured_output` field is the schema-validated result (already
+parsed — no second-layer unwrap). On `is_error:true`, a non-zero exit, or a
+timeout, the handler returns `{"status":"ERROR","message":...}` (same shape
+`/kinetica` uses so the browser's error path is unchanged). Model IDs are
+passed through verbatim; `--json-schema` takes **inline JSON**, not a file
+path. Models: `claude-haiku-4-5-20251001` (default — fast) and
+`claude-opus-4-8` (selectable — best extraction). A `--claude-bin` flag
+defaults to `claude` on `PATH`.
+
+#### 2.1.2 Gemini provider — `/gemini` route
+
+serve.py's `/gemini` handler obtains a Vertex access token via
+`gcloud auth print-access-token` (stdlib `subprocess`, stored gcloud login —
+no API key) and POSTs (stdlib `urllib`) to the Vertex REST endpoint:
+
+```
+POST https://{region}-aiplatform.googleapis.com/v1/projects/{project}/locations/{region}/publishers/google/models/{model}:generateContent
+Authorization: Bearer <token>
+```
+
+with `generationConfig.responseMimeType:"application/json"` and
+`generationConfig.responseSchema` = the combined schema. The response text is
+JSON-parsed; token/HTTP/`gcloud` failures return the same
+`{"status":"ERROR","message":...}` shape. Project and region come from
+`--gcp-project` (default: `gcloud config get-value project`) and `--gcp-region`
+(default `global`). Models: `gemini-2.5-flash` (default — fast) and
+`gemini-2.5-pro` (selectable). One-time operator setup: `gcloud auth login`.
+Gemini's `responseSchema` dialect is a restricted subset (no `$ref`, limited
+keywords); the schema stays flat enough to satisfy it, and the shared
+post-processing guards below are the safety net regardless.
+
+#### 2.1.3 Ollama extraction retired
+
+The SP1 Ollama *chat/extraction* provider and its `format`-schema path are
+removed from the extraction dropdown (the user's "offline LLM can go"
+decision). The `/ollama` proxy route and the Ollama *embeddings* provider
+stay — embeddings still need a real local option, which neither cloud LLM
+supplies here.
+
+#### 2.1.4 The combined call
+
+Every provider issues ONE schema-constrained call returning BOTH entities and
+relations:
 
 ```json
 {
@@ -107,11 +169,10 @@ One schema-constrained `/api/chat` (Ollama) or `/v1/chat/completions`
 }
 ```
 
-- `label` and `predicate` are `enum`-constrained in the JSON schema passed as
-  Ollama `format` (object schema) with `options.temperature:0`. The OpenAI path
-  keeps `response_format:{type:"json_object"}` and relies on the prompt +
-  post-processing guards (schema-as-format is Ollama-specific).
-- **Post-processing guards (shared, both providers):**
+- `label` and `predicate` are `enum`-constrained in the schema (Claude
+  `--json-schema`; Gemini `responseSchema`). Determinism is requested where
+  the provider supports it (Gemini `temperature:0`).
+- **Post-processing guards (shared, all providers):**
   - `normLabel(v)` folds any label wording onto the five types (exact match
     first; then keyword contains — `busin`→Business, `org|agenc|govern|
     ngo|univers|institut|associat`→Organization, `facilit|airport|stadium|
@@ -325,9 +386,14 @@ Extend `scripts/test_graph.mjs` (all new pure fns inside CORE markers):
   `mergeEdgeAccum`) — new PK/`edge_kind` present; a relation edge and an
   `EMBEDDED` edge on the same pair coexist as two rows.
 
-Manual (user, live Ollama): extract the mixed sample; confirm five distinct
-colored types render, relations appear as typed edges, and Copy SQL emits
-both edge layers + a runnable `CREATE UNDIRECTED GRAPH`.
+`scripts/test_serve.py` gains cases for the `/claude` and `/gemini` route
+dispatch and their error normalization (the subprocess/urllib calls are
+stubbed — no live LLM in the automated harness).
+
+Manual (user, live Claude and Gemini): with `claude` logged in and
+`gcloud auth login` done, extract the mixed sample under each provider;
+confirm five distinct colored types render, relations appear as typed edges,
+and Copy SQL emits both edge layers + a runnable `CREATE UNDIRECTED GRAPH`.
 
 `sql/schema.sql` is updated in the same commit as the DDL change (per the
 repo convention that `ddl()`/`graphDdl()` are the source of truth and the file
@@ -337,9 +403,15 @@ is documentation).
 
 ## 9. Files touched
 
-- `index.html` — the app (types, palette, extraction, disambiguation, edges,
-  emitters, entities panel).
+- `index.html` — the app (types, palette, extraction with Claude/Gemini
+  providers, disambiguation, edges, emitters, entities panel).
+- `scripts/serve.py` — new `/claude` (subprocess) and `/gemini` (gcloud token
+  + urllib) proxy routes; `--claude-bin`, `--gcp-project`, `--gcp-region`
+  flags; Ollama chat route unchanged.
 - `scripts/test_graph.mjs` — new/extended CORE tests.
+- `scripts/test_serve.py` — `/claude` and `/gemini` dispatch + error tests.
 - `sql/schema.sql` — reference DDL kept in sync.
-- `CLAUDE.md` — document the five-type ontology, two-layer edge model, and the
-  combined extraction call.
+- `SETUP.md` — Claude CLI login + `gcloud auth login` provider setup; retire
+  the Ollama-extraction verification step (keep Ollama embeddings).
+- `CLAUDE.md` — document the five-type ontology, two-layer edge model, the
+  combined extraction call, and the Claude/Gemini providers.
