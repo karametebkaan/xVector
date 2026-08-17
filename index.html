@@ -467,7 +467,8 @@ const DIM = 64;
 const $ = id => document.getElementById(id);
 let DOCS = [];           // {id, text, tokens, vec:Float64Array}
 let ENTITIES = [];       // {name, label, docIds, count, aliases}
-let EDGES = [];          // {node1, node2, type, weight}
+let EDGES = [];          // {node1, node2, label, edge_kind, weight, sum_wv, sum_w}
+let RELATIONS = [];      // {subject, predicate, object, docIds} from the last LLM extraction
 let LAST_TABLE = "";     // fully qualified name of the last successful write
 
 /* ---------------- console ---------------- */
@@ -669,7 +670,6 @@ async function refreshOllamaModels(){
   try {
     const names = await ollamaModels();
     fillModelSelect($("ollamaEmbedModel"), names);
-    fillModelSelect($("ollamaChatModel"), names);
     log("Ollama: "+names.length+" model(s) available", names.length ? "ok" : "warn");
   } catch(e){
     log("Can't reach Ollama at "+(($("ollamaUrl").value.trim())||"/ollama")+" — is `ollama serve` running and did you start serve.py with --ollama? ("+e.message+")", "err");
@@ -1321,7 +1321,7 @@ function renderEntities(){
   if (!ENTITIES.length){ host.innerHTML = '<div class="empty">No entities extracted yet.</div>'; return; }
   for (const e of ENTITIES){
     const el = document.createElement("div"); el.className = "doc";
-    const color = e.label === "Person" ? "var(--signal)" : "var(--warm)";
+    const color = "var("+((TYPES[e.label] && TYPES[e.label].colorVar) || "--muted")+")";
     const head = document.createElement("div"); head.className = "doc-head";
     head.innerHTML = '<span class="doc-id" style="color:'+color+'">'+e.label+'</span>'+
       '<span class="doc-meta">'+e.count+' mentions · docs '+e.docIds.join(", ")+'</span>';
@@ -1349,12 +1349,13 @@ function renderGraph(){
   if (!EDGES.length){ host.innerHTML = '<div class="empty">No graph built yet.</div>'; return; }
   if (!kept.length){ host.innerHTML = '<div class="empty">No edges at or above '+th.toFixed(2)+'.</div>'; return; }
   const el = document.createElement("table"); el.className = "res";
-  const hr = el.insertRow(); ["source","target","type","weight"].forEach(h => { const th2=document.createElement("th"); th2.textContent=h; hr.appendChild(th2); });
+  const hr = el.insertRow(); ["source","target","label","weight"].forEach(h => { const th2=document.createElement("th"); th2.textContent=h; hr.appendChild(th2); });
   for (const e of kept){
     const tr = el.insertRow();
     tr.insertCell().textContent = e.node1;
     tr.insertCell().textContent = e.node2;
-    tr.insertCell().textContent = e.type;
+    const lc = tr.insertCell(); lc.textContent = e.label;
+    lc.style.color = "var("+(e.edge_kind === "relation" ? "--org" : "--muted")+")";
     const c = tr.insertCell(); c.className = "num"; c.textContent = e.weight.toFixed(4);
   }
   host.appendChild(el);
@@ -1380,7 +1381,7 @@ async function resolveApi(mentions){
     const res = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({mentions})});
     const j = JSON.parse(await res.text());
     if (Array.isArray(j.entities)) return j.entities.map(e => ({
-      name:String(e.name), label: e.label === "Business" ? "Business":"Person",
+      name:String(e.name), label: normLabel(e.label),
       docIds:[...new Set(e.doc_ids||[])].sort((a,b)=>a-b), count:(e.count||(e.doc_ids||[]).length), aliases:(e.aliases||[String(e.name)]) }));
     throw new Error("no entities array");
   } catch(e){ log("Resolver API failed ("+e.message+") — using heuristic.", "warn"); return mergeMentions(mentions, "heuristic"); }
@@ -1601,13 +1602,18 @@ $("btnExtract").addEventListener("click", async () => {
   const btn = $("btnExtract"); btn.disabled = true; btn.textContent = "Extracting…";
   try {
     const docs = DOCS.map(d => ({id:d.id, text:d.text}));
-    const mentions = $("extractProvider").value === "local" ? extractLocalMentions(docs) : await extractLLM(docs);
+    const ex = $("extractProvider").value === "local"
+      ? {mentions: extractLocalMentions(docs), relations: []}
+      : await extractLLM(docs);
     const mode = $("resolveMode").value;
-    ENTITIES = mode === "api" ? await resolveApi(mentions) : mergeMentions(mentions, mode);
+    ENTITIES = mode === "api" ? await resolveApi(ex.mentions) : mergeMentions(ex.mentions, mode);
+    RELATIONS = ex.relations || [];
     for (const e of ENTITIES){ if (e.name.length > 64) log("Name over 64 chars will be truncated for CHAR(64): "+e.name, "warn"); }
     renderEntities();
-    const np = ENTITIES.filter(e=>e.label==="Person").length, nb = ENTITIES.length-np;
-    log("Extracted "+ENTITIES.length+" entities ("+np+" people, "+nb+" businesses).", "ok");
+    const byType = {}; for (const e of ENTITIES) byType[e.label] = (byType[e.label]||0)+1;
+    const summary = Object.keys(TYPES).filter(t=>byType[t]).map(t=>byType[t]+" "+t).join(", ") || "0";
+    log("Extracted "+ENTITIES.length+" entities ("+summary+"); "+RELATIONS.length+" relations.", "ok");
+    if ($("extractProvider").value === "local" && ENTITIES.length) log("Local extraction produces no relations — only the EMBEDDED similarity layer will be built.", "warn");
   } catch(e){ log("Extraction failed: "+e.message, "err"); }
   finally { btn.disabled = false; btn.textContent = "Extract entities"; }
 });
@@ -1619,7 +1625,11 @@ $("btnBuildGraph").addEventListener("click", () => {
   const ops = ENTITIES.reduce((n,e)=>n+e.docIds.length,0);
   if (ENTITIES.length*ENTITIES.length*Math.pow(ops/Math.max(1,ENTITIES.length),2) > 2e6)
     log("Large entity/doc set — edge computation may be slow.", "warn");
-  EDGES = computeEdges(ENTITIES, dv);
+  const embedded = computeEdges(ENTITIES, dv);
+  const rel = buildRelationEdges(RELATIONS, ENTITIES);
+  if (rel.dropped) log(rel.dropped+" relation(s) dropped (endpoint not in entity set).", "warn");
+  EDGES = embedded.concat(rel.edges);
+  EDGES.sort((a,b) => b.weight - a.weight);
   renderGraph();
   populateGraphBox();
   log("Built "+EDGES.length+" candidate edges across "+ENTITIES.length+" entities.", "ok");
@@ -1700,7 +1710,11 @@ async function appendBatch(){
     log("Inserted "+DOCS.length+" documents into "+emb+".", "ok");
     // 4. extract mentions from the new docs
     const docs = DOCS.map(x => ({id:x.id, text:x.text}));
-    const mentions = $("extractProvider").value === "local" ? extractLocalMentions(docs) : await extractLLM(docs);
+    const ex = $("extractProvider").value === "local"
+      ? {mentions: extractLocalMentions(docs), relations: []}
+      : await extractLLM(docs);
+    const mentions = ex.mentions;
+    RELATIONS = ex.relations || [];
     // 5. incremental identity resolution against the persisted node table
     const ddlMode = opts.createMode === "replace" ? "ifnot" : opts.createMode;
     const gd = graphDdl({...opts, createMode: ddlMode}), md = membershipDdl({...opts, createMode: ddlMode});
@@ -1741,14 +1755,18 @@ async function appendBatch(){
     }
     const deltas = docPairContributions(pairs, membership);
     // 8. merge with existing accumulators and upsert edges
-    const names = [...new Set(deltas.flatMap(e => [e.node1, e.node2]))];
+    const relBuilt = buildRelationEdges(RELATIONS, ENTITIES);
+    if (relBuilt.dropped) log(relBuilt.dropped+" relation(s) dropped (endpoint not in entity set).", "warn");
+    const layerDeltas = deltas.concat(relBuilt.edges.map(e => ({node1:e.node1, node2:e.node2, label:e.label,
+      edge_kind:e.edge_kind, d_wv:e.sum_wv, d_w:e.sum_w})));
+    const names = [...new Set(layerDeltas.flatMap(e => [e.node1, e.node2]))];
     const accum = new Map();
     if (names.length){
       const ea = await readRows(edgeAccumQuery(graphTableName(opts.prefix,"edges",opts.stamp,opts.schema), names));
-      if (ea) for (const [n1,n2,swv,sw] of ea.rows) accum.set(n1+"\u0000"+n2, {sum_wv:swv||0, sum_w:sw||0});
+      if (ea) for (const [n1,n2,el,swv,sw] of ea.rows) accum.set(n1+" "+n2+" "+el, {sum_wv:swv||0, sum_w:sw||0});
     }
-    EDGES = deltas.map(e => { const m = mergeEdgeAccum(accum.get(e.node1+"\u0000"+e.node2), {d_wv:e.d_wv, d_w:e.d_w});
-      return {node1:e.node1, node2:e.node2, type:e.type, weight:m.weight, sum_wv:m.sum_wv, sum_w:m.sum_w}; });
+    EDGES = layerDeltas.map(e => { const m = mergeEdgeAccum(accum.get(e.node1+" "+e.node2+" "+e.label), {d_wv:e.d_wv, d_w:e.d_w});
+      return {node1:e.node1, node2:e.node2, label:e.label, edge_kind:e.edge_kind, weight:m.weight, sum_wv:m.sum_wv, sum_w:m.sum_w}; });
     EDGES.sort((a,b) => b.weight - a.weight);
     for (const s of edgeUpserts(EDGES, opts)) await ksql(s);
     step(ins.length+6, ins.length+6);
