@@ -97,8 +97,10 @@ INSERT INTO graph_membership_<datestamp> (node, doc_id, label) VALUES
     ('Kaan Karamete', 1, ARRAY['People']),
     ('Acme Corp', 1, ARRAY['Business']);
 
--- Promote to a native graph (strength → cost for solvers):
-CREATE UNDIRECTED GRAPH entity_graph_<datestamp> (
+-- Promote to a native graph (strength → cost for solvers). OR REPLACE so a
+-- re-run rebuilds from current tables (Kinetica has no DROP GRAPH IF EXISTS).
+-- The graph name is configurable in the app (defaults to entity_graph_<datestamp>):
+CREATE OR REPLACE UNDIRECTED GRAPH entity_graph_<datestamp> (
   NODES => INPUT_TABLES((SELECT * FROM graph_nodes_<datestamp>)),
   EDGES => INPUT_TABLES((SELECT node1, node2, label,
                          (1 - weight) AS WEIGHT_VALUESPECIFIED FROM graph_edges_<datestamp>)));

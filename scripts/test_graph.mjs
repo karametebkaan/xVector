@@ -231,7 +231,7 @@ test("nodeInserts and edgeInserts produce ARRAY literals and filtered rows", () 
 
 test("graphScript includes commented CREATE GRAPH trailer", () => {
   const s = core.graphScript([{name:"A",label:"Person",docIds:[1],count:1,aliases:["A"]}], [], OPTS, 0.5);
-  assert.match(s, /-- CREATE UNDIRECTED GRAPH entity_graph_20260101/);
+  assert.match(s, /-- CREATE OR REPLACE UNDIRECTED GRAPH entity_graph_20260101/);
   assert.match(s, /\(1 - weight\) AS WEIGHT_VALUESPECIFIED/);
 });
 
@@ -248,10 +248,17 @@ test("graphNameOf accepts a valid identifier and optional schema prefix", () => 
   assert.equal(core.graphNameOf({...OPTS, graphName:"ki_home.my_graph"}), "ki_home.my_graph");
 });
 
-test("createGraphSql uses the resolved graph name and default fallback", () => {
-  assert.match(core.createGraphSql(OPTS), /CREATE UNDIRECTED GRAPH entity_graph_20260101 \(/);
+test("createGraphSql is idempotent (CREATE OR REPLACE) and uses the resolved name", () => {
+  assert.match(core.createGraphSql(OPTS),
+               /CREATE OR REPLACE UNDIRECTED GRAPH entity_graph_20260101 \(/);
   assert.match(core.createGraphSql({...OPTS, graphName:"my_graph"}),
-               /CREATE UNDIRECTED GRAPH my_graph \(/);
+               /CREATE OR REPLACE UNDIRECTED GRAPH my_graph \(/);
+});
+
+test("graphDdlMode: recreate replaces tables, append creates-if-missing", () => {
+  assert.equal(core.graphDdlMode("recreate"), "replace");
+  assert.equal(core.graphDdlMode("append"), "ifnot");
+  assert.equal(core.graphDdlMode(""), "replace");        // default is a fresh rebuild
 });
 
 test("nextIdBase: empty/null table starts at 1, else max+1", () => {
@@ -487,7 +494,7 @@ test("read-back queries target the right tables and filters", () => {
 
 test("createGraphSql is runnable (uncommented) and aliases WEIGHT_VALUESPECIFIED", () => {
   const s = core.createGraphSql(OPTS);
-  assert.match(s, /^CREATE UNDIRECTED GRAPH entity_graph_20260101/);
+  assert.match(s, /^CREATE OR REPLACE UNDIRECTED GRAPH entity_graph_20260101/);
   assert.ok(!/^--/.test(s));
   assert.match(s, /\(1 - weight\) AS WEIGHT_VALUESPECIFIED FROM graph_edges_20260101/);
 });

@@ -191,9 +191,16 @@ the longest/best existing variant back as the canonical node, and the new varian
 This ensures graph queries and external links to entities remain valid across appends.
 
 `graphDdl()`, `nodeInserts()`, `edgeInserts()`, `edgeUpserts()`, `membershipInserts()`, and `graphScript()`
-emit the full DDL and INSERT/UPSERT statements. `createGraphSql()` emits a runnable `CREATE UNDIRECTED GRAPH`
-statement (no longer commented), aliasing `(1 - weight) AS WEIGHT_VALUESPECIFIED` to convert edge strength
-to solver cost. The graph name comes from `graphNameOf(opts)`: the **Graph name** input (`#gName`) when it is
+emit the full DDL and INSERT/UPSERT statements. `createGraphSql()` emits a runnable `CREATE OR REPLACE
+UNDIRECTED GRAPH` statement (no longer commented; `OR REPLACE` so a re-run rebuilds the graph from current
+tables instead of failing "graph already exists" — Kinetica has no `DROP GRAPH IF EXISTS`), aliasing
+`(1 - weight) AS WEIGHT_VALUESPECIFIED` to convert edge strength to solver cost. The graph-table create
+semantics come from `graphDdlMode(writeMode)`, driven by the graph **Write mode** (`#writeMode`) — NOT the
+embeddings "On write" selector (`#createMode`): `recreate` → `CREATE OR REPLACE TABLE` + plain inserts (a true
+rebuild, so a re-run never hits an existing PK); `append` → `CREATE TABLE IF NOT EXISTS` + upserts. Conflating
+the two selectors was a bug: Recreate used to inherit the embeddings default (`ifnot`), leaving stale tables
+that plain inserts then collided with ("Primary Key already exists"). The graph name comes from
+`graphNameOf(opts)`: the **Graph name** input (`#gName`) when it is
 identifier-safe (`[A-Za-z_]\w*`, optional `schema.` prefix — it lands in DDL unquoted), else the stable
 default `entity_graph_<stamp>`. The editable SQL box (part of Task 7) replaces the old silent store button,
 allowing users to review and edit all statements (including the `CREATE GRAPH`) before execution; when the box
@@ -217,7 +224,7 @@ These are used in the Entities panel and graph visualization to visually disting
 functions — `extractLocalMentions()`, `mergeMentions()`, `computeEdges()`, `blockKey()`,
 `mergeEdgeAccum()`, `resolveIncremental()`, `pickEmbeddings()`, `foldExtraction()`,
 `buildRelationEdges()`, `normLabel()`, `normPredicate()`, `classifySpan()` (five-type),
-`graphNameOf()`, and the SQL emitters — which are wrapped in `/* CORE:BEGIN */ … /* CORE:END */` markers so
+`graphNameOf()`, `graphDdlMode()`, and the SQL emitters — which are wrapped in `/* CORE:BEGIN */ … /* CORE:END */` markers so
 the stdlib-only harness can extract and eval them. These functions underpin both Recreate
 and Append workflows. `scripts/test_serve.py` covers the proxy route dispatcher
 `resolve_upstream()`, and the Claude/Gemini transport functions `run_claude()` and `run_gemini()`.

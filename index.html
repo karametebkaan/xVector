@@ -1238,10 +1238,18 @@ function graphNameOf(opts){
     return guardName(raw);
   return "entity_graph_"+opts.stamp;
 }
+function graphDdlMode(writeMode){
+  // Graph-table create semantics follow the graph Write mode, NOT the
+  // embeddings "On write" selector: recreate rebuilds from scratch (so plain
+  // inserts never hit an existing PK), append creates the tables if missing.
+  return writeMode === "append" ? "ifnot" : "replace";
+}
 function createGraphSql(opts){
   const nt = graphTableName(opts.prefix,"nodes",opts.stamp,opts.schema);
   const et = graphTableName(opts.prefix,"edges",opts.stamp,opts.schema);
-  return "CREATE UNDIRECTED GRAPH "+graphNameOf(opts)+" (\n"+
+  // OR REPLACE so re-running the box rebuilds the graph from current tables
+  // instead of failing with "graph already exists".
+  return "CREATE OR REPLACE UNDIRECTED GRAPH "+graphNameOf(opts)+" (\n"+
          "  NODES => INPUT_TABLES((SELECT * FROM "+nt+")),\n"+
          "  EDGES => INPUT_TABLES((SELECT node1, node2, label,\n"+
          "                         (1 - weight) AS WEIGHT_VALUESPECIFIED FROM "+et+")))";
@@ -1656,7 +1664,7 @@ $("btnGraphSql").addEventListener("click", async () => {
 function graphSqlText(mode){
   const opts = graphOpts(); const th = parseFloat($("threshold").value);
   const parts = [];
-  const ddlOpts = (mode === "append" && opts.createMode === "replace") ? {...opts, createMode:"ifnot"} : opts;
+  const ddlOpts = {...opts, createMode: graphDdlMode(mode)};
   const gd = graphDdl(ddlOpts), md = membershipDdl(ddlOpts);
   if (gd){ parts.push(gd.nodes, gd.edges); } if (md) parts.push(md);
   if (mode === "append"){
@@ -1684,8 +1692,8 @@ $("btnRunGraphSql").addEventListener("click", async () => {
     for (let i=0;i<stmts.length;i++){
       await ksql(stmts[i]);
       fill.style.width = Math.round(100*(i+1)/stmts.length)+"%";
-      const g = stmts[i].match(/CREATE\s+(?:UN)?DIRECTED\s+GRAPH\s+([A-Za-z_][\w.]*)/i)
-             || stmts[i].match(/CREATE\s+GRAPH\s+([A-Za-z_][\w.]*)/i);
+      const g = stmts[i].match(/CREATE\s+(?:OR\s+REPLACE\s+)?(?:UN)?DIRECTED\s+GRAPH\s+([A-Za-z_][\w.]*)/i)
+             || stmts[i].match(/CREATE\s+(?:OR\s+REPLACE\s+)?GRAPH\s+([A-Za-z_][\w.]*)/i);
       if (g){ graphMade = g[1]; log("Graph '"+graphMade+"' created in Kinetica.", "ok"); }
       else log("Ran statement "+(i+1)+"/"+stmts.length+".", "dim");
     }
