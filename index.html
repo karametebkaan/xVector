@@ -417,6 +417,10 @@ Separate each one with a blank line by default — every paragraph becomes one r
           <input type="text" id="gPrefix" value="graph">
         </div>
         <div class="field" style="max-width:200px">
+          <label for="gName">Graph name</label>
+          <input type="text" id="gName" placeholder="entity_graph_<stamp>">
+        </div>
+        <div class="field" style="max-width:200px">
           <label for="writeMode">Write mode</label>
           <select id="writeMode">
             <option value="recreate">Recreate (drop + rebuild)</option>
@@ -1226,10 +1230,18 @@ function edgeAccumQuery(table, names){
 function nodeBlockQuery(table, keys){
   return "SELECT node, label, doc_ids, doc_count, aliases, block_key FROM "+table+" WHERE block_key IN "+inList(keys,"str");
 }
+function graphNameOf(opts){
+  // Resolve the CREATE GRAPH name: a user value if it is identifier-safe
+  // (it lands in DDL unquoted), else the stable default. Optional schema prefix.
+  const raw = String(opts.graphName || "").trim();
+  if (raw && /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$/.test(raw))
+    return guardName(raw);
+  return "entity_graph_"+opts.stamp;
+}
 function createGraphSql(opts){
   const nt = graphTableName(opts.prefix,"nodes",opts.stamp,opts.schema);
   const et = graphTableName(opts.prefix,"edges",opts.stamp,opts.schema);
-  return "CREATE UNDIRECTED GRAPH entity_graph_"+opts.stamp+" (\n"+
+  return "CREATE UNDIRECTED GRAPH "+graphNameOf(opts)+" (\n"+
          "  NODES => INPUT_TABLES((SELECT * FROM "+nt+")),\n"+
          "  EDGES => INPUT_TABLES((SELECT node1, node2, label,\n"+
          "                         (1 - weight) AS WEIGHT_VALUESPECIFIED FROM "+et+")))";
@@ -1337,6 +1349,7 @@ function renderEntities(){
 
 function graphOpts(){
   return { prefix: ($("gPrefix").value||"graph").trim(), stamp: stamp(),
+    graphName: ($("gName").value||"").trim(),
     schema: ($("kSchema").value||"").trim(), createMode: $("createMode").value,
     batchSize: Math.max(1, parseInt($("batchSize").value,10)||50), createdAt: nowLiteral() };
 }
@@ -1667,12 +1680,17 @@ $("btnRunGraphSql").addEventListener("click", async () => {
   const bar = $("gbar"); bar.style.display = "block"; const fill = bar.querySelector("span");
   const btn = $("btnRunGraphSql"); btn.disabled = true;
   try {
+    let graphMade = null;
     for (let i=0;i<stmts.length;i++){
       await ksql(stmts[i]);
       fill.style.width = Math.round(100*(i+1)/stmts.length)+"%";
-      log("Ran statement "+(i+1)+"/"+stmts.length+".", "dim");
+      const g = stmts[i].match(/CREATE\s+(?:UN)?DIRECTED\s+GRAPH\s+([A-Za-z_][\w.]*)/i)
+             || stmts[i].match(/CREATE\s+GRAPH\s+([A-Za-z_][\w.]*)/i);
+      if (g){ graphMade = g[1]; log("Graph '"+graphMade+"' created in Kinetica.", "ok"); }
+      else log("Ran statement "+(i+1)+"/"+stmts.length+".", "dim");
     }
-    log("Ran "+stmts.length+" statements from the SQL box.", "ok");
+    log("Ran "+stmts.length+" statements from the SQL box"+
+        (graphMade ? " — graph '"+graphMade+"' is ready to query." : "."), "ok");
   } catch(e){
     log("SQL box run failed: "+e.message, "err");
     log("Statements before the failure were applied; fix and re-run (upserts converge).", "dim");

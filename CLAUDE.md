@@ -193,8 +193,12 @@ This ensures graph queries and external links to entities remain valid across ap
 `graphDdl()`, `nodeInserts()`, `edgeInserts()`, `edgeUpserts()`, `membershipInserts()`, and `graphScript()`
 emit the full DDL and INSERT/UPSERT statements. `createGraphSql()` emits a runnable `CREATE UNDIRECTED GRAPH`
 statement (no longer commented), aliasing `(1 - weight) AS WEIGHT_VALUESPECIFIED` to convert edge strength
-to solver cost. The editable SQL box (part of Task 7) replaces the old silent store button, allowing users
-to review and edit all statements (including the `CREATE GRAPH`) before execution.
+to solver cost. The graph name comes from `graphNameOf(opts)`: the **Graph name** input (`#gName`) when it is
+identifier-safe (`[A-Za-z_]\w*`, optional `schema.` prefix — it lands in DDL unquoted), else the stable
+default `entity_graph_<stamp>`. The editable SQL box (part of Task 7) replaces the old silent store button,
+allowing users to review and edit all statements (including the `CREATE GRAPH`) before execution; when the box
+runs, the `CREATE ... GRAPH` statement is detected and logged as a distinct green `Graph '<name>' created` line
+so graph creation is visible, not buried in the per-statement log.
 
 ### Palette extension
 
@@ -213,7 +217,7 @@ These are used in the Entities panel and graph visualization to visually disting
 functions — `extractLocalMentions()`, `mergeMentions()`, `computeEdges()`, `blockKey()`,
 `mergeEdgeAccum()`, `resolveIncremental()`, `pickEmbeddings()`, `foldExtraction()`,
 `buildRelationEdges()`, `normLabel()`, `normPredicate()`, `classifySpan()` (five-type),
-and the SQL emitters — which are wrapped in `/* CORE:BEGIN */ … /* CORE:END */` markers so
+`graphNameOf()`, and the SQL emitters — which are wrapped in `/* CORE:BEGIN */ … /* CORE:END */` markers so
 the stdlib-only harness can extract and eval them. These functions underpin both Recreate
 and Append workflows. `scripts/test_serve.py` covers the proxy route dispatcher
 `resolve_upstream()`, and the Claude/Gemini transport functions `run_claude()` and `run_gemini()`.

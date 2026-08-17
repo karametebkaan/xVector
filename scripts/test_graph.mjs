@@ -235,6 +235,25 @@ test("graphScript includes commented CREATE GRAPH trailer", () => {
   assert.match(s, /\(1 - weight\) AS WEIGHT_VALUESPECIFIED/);
 });
 
+test("graphNameOf defaults to entity_graph_<stamp> when name blank/absent/invalid", () => {
+  assert.equal(core.graphNameOf(OPTS), "entity_graph_20260101");
+  assert.equal(core.graphNameOf({...OPTS, graphName:"  "}), "entity_graph_20260101");
+  assert.equal(core.graphNameOf({...OPTS, graphName:"bad name!"}), "entity_graph_20260101");
+  assert.equal(core.graphNameOf({...OPTS, graphName:"1leading"}), "entity_graph_20260101");
+});
+
+test("graphNameOf accepts a valid identifier and optional schema prefix", () => {
+  assert.equal(core.graphNameOf({...OPTS, graphName:"my_graph"}), "my_graph");
+  assert.equal(core.graphNameOf({...OPTS, graphName:"  My_Graph2  "}), "My_Graph2");
+  assert.equal(core.graphNameOf({...OPTS, graphName:"ki_home.my_graph"}), "ki_home.my_graph");
+});
+
+test("createGraphSql uses the resolved graph name and default fallback", () => {
+  assert.match(core.createGraphSql(OPTS), /CREATE UNDIRECTED GRAPH entity_graph_20260101 \(/);
+  assert.match(core.createGraphSql({...OPTS, graphName:"my_graph"}),
+               /CREATE UNDIRECTED GRAPH my_graph \(/);
+});
+
 test("nextIdBase: empty/null table starts at 1, else max+1", () => {
   assert.equal(core.nextIdBase(null), 1);
   assert.equal(core.nextIdBase(undefined), 1);
