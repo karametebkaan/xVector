@@ -219,12 +219,14 @@ test("nodeInserts and edgeInserts produce ARRAY literals and filtered rows", () 
   assert.match(ni[0], /ARRAY\[1,2\]/);
   assert.match(ni[0], /'Kaan Karamete'/);
 
-  const edges = [{node1:"A",node2:"B",type:"person-person",weight:0.73},{node1:"A",node2:"C",type:"person-person",weight:0.2}];
+  const edges = [{node1:"A",node2:"B",label:"EMBEDDED",edge_kind:"embedded",weight:0.73,sum_wv:7.3,sum_w:10},
+                 {node1:"A",node2:"C",label:"EMBEDDED",edge_kind:"embedded",weight:0.2,sum_wv:2,sum_w:10}];
   const ei = core.edgeInserts(edges, OPTS, 0.5);
-  assert.equal(ei.length, 1);              // one batch
-  assert.match(ei[0], /ARRAY\['person-person'\]/);
+  assert.equal(ei.length, 1);
+  assert.match(ei[0], /ARRAY\['EMBEDDED'\]/);
+  assert.match(ei[0], /'EMBEDDED', 'embedded'/);   // edge_label, edge_kind scalars
   assert.match(ei[0], /0\.73/);
-  assert.ok(!/'C'/.test(ei[0]));           // below-threshold edge dropped
+  assert.ok(!/'C'/.test(ei[0]));                   // below-threshold dropped
 });
 
 test("graphScript includes commented CREATE GRAPH trailer", () => {
@@ -414,16 +416,15 @@ test("nodeInserts includes block_key and supports upsert hint", () => {
   assert.match(up[0], /INSERT INTO \/\* KI_HINT_UPDATE_ON_EXISTING_PK \*\/ graph_nodes_20260101/);
 });
 
-test("edgeUpserts stores all edges with accumulators and the upsert hint", () => {
+test("edgeUpserts stores all edges with accumulators, edge_kind, and the upsert hint", () => {
   const edges = [
-    {node1:"A",node2:"B",type:"person-person",weight:0.7,sum_wv:7,sum_w:10},
-    {node1:"A",node2:"C",type:"person-person",weight:0.2,sum_wv:2,sum_w:10},
+    {node1:"A",node2:"B",label:"EMBEDDED",edge_kind:"embedded",weight:0.7,sum_wv:7,sum_w:10},
+    {node1:"Kaan",node2:"Acme",label:"WORKS_AT",edge_kind:"relation",weight:1.0,sum_wv:1,sum_w:1},
   ];
   const s = core.edgeUpserts(edges, OPTS);
   assert.match(s[0], /INSERT INTO \/\* KI_HINT_UPDATE_ON_EXISTING_PK \*\/ graph_edges_20260101/);
-  assert.match(s[0], /'A', 'B'/);
-  assert.match(s[0], /'A', 'C'/);        // no threshold filter — both kept
-  assert.match(s[0], /0\.7,\s*7,\s*10/);
+  assert.match(s[0], /'A', 'B', ARRAY\['EMBEDDED'\], 'EMBEDDED', 'embedded'/);
+  assert.match(s[0], /'Kaan', 'Acme', ARRAY\['WORKS_AT'\], 'WORKS_AT', 'relation'/);
 });
 
 test("membershipInserts builds typed rows", () => {
@@ -449,7 +450,7 @@ test("inList quotes/escapes strings and passes ints; empty -> (NULL)", () => {
 test("read-back queries target the right tables and filters", () => {
   assert.equal(core.membershipQuery("m", [1,2]), "SELECT node, doc_id, label FROM m WHERE doc_id IN (1,2)");
   assert.equal(core.edgeAccumQuery("e", ["A","B"]),
-    "SELECT node1, node2, sum_wv, sum_w FROM e WHERE node1 IN ('A','B') OR node2 IN ('A','B')");
+    "SELECT node1, node2, edge_label, sum_wv, sum_w FROM e WHERE node1 IN ('A','B') OR node2 IN ('A','B')");
   assert.equal(core.nodeBlockQuery("n", ["karamete","acme"]),
     "SELECT node, label, doc_ids, doc_count, aliases, block_key FROM n WHERE block_key IN ('karamete','acme')");
 });

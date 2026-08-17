@@ -1072,13 +1072,16 @@ function nodeInserts(entities, opts){
 function edgeInserts(edges, opts, threshold){
   const t = graphTableName(opts.prefix,"edges",opts.stamp,opts.schema);
   const size = Math.max(1, opts.batchSize||50);
-  const cols = "(node1, node2, label, weight, sum_wv, sum_w, created_at)";
+  const cols = "(node1, node2, label, edge_label, edge_kind, weight, sum_wv, sum_w, created_at)";
   const kept = edges.filter(e => e.weight >= threshold);
   const out = [];
   for (let i=0;i<kept.length;i+=size){
-    const rows = kept.slice(i,i+size).map(e =>
-      "    ('"+esc(guardName(e.node1))+"', '"+esc(guardName(e.node2))+"', "+arrayLit([e.type],"str")+", "+
-      num(e.weight)+", "+num(e.sum_wv!=null?e.sum_wv:e.weight)+", "+num(e.sum_w!=null?e.sum_w:1)+", '"+opts.createdAt+"')");
+    const rows = kept.slice(i,i+size).map(e => {
+      const lbl = e.label || "EMBEDDED", kind = e.edge_kind || "embedded";
+      return "    ('"+esc(guardName(e.node1))+"', '"+esc(guardName(e.node2))+"', "+arrayLit([lbl],"str")+", '"+
+        esc(lbl.slice(0,32))+"', '"+esc(kind)+"', "+num(e.weight)+", "+
+        num(e.sum_wv!=null?e.sum_wv:e.weight)+", "+num(e.sum_w!=null?e.sum_w:1)+", '"+opts.createdAt+"')";
+    });
     out.push("INSERT INTO "+t+"\n"+cols+"\nVALUES\n"+rows.join(",\n"));
   }
   return out;
@@ -1086,12 +1089,14 @@ function edgeInserts(edges, opts, threshold){
 function edgeUpserts(edges, opts){
   const t = graphTableName(opts.prefix,"edges",opts.stamp,opts.schema);
   const size = Math.max(1, opts.batchSize||50);
-  const cols = "(node1, node2, label, weight, sum_wv, sum_w, created_at)";
+  const cols = "(node1, node2, label, edge_label, edge_kind, weight, sum_wv, sum_w, created_at)";
   const out = [];
   for (let i=0;i<edges.length;i+=size){
-    const rows = edges.slice(i,i+size).map(e =>
-      "    ('"+esc(guardName(e.node1))+"', '"+esc(guardName(e.node2))+"', "+arrayLit([e.type],"str")+", "+
-      num(e.weight)+", "+num(e.sum_wv)+", "+num(e.sum_w)+", '"+opts.createdAt+"')");
+    const rows = edges.slice(i,i+size).map(e => {
+      const lbl = e.label || "EMBEDDED", kind = e.edge_kind || "embedded";
+      return "    ('"+esc(guardName(e.node1))+"', '"+esc(guardName(e.node2))+"', "+arrayLit([lbl],"str")+", '"+
+        esc(lbl.slice(0,32))+"', '"+esc(kind)+"', "+num(e.weight)+", "+num(e.sum_wv)+", "+num(e.sum_w)+", '"+opts.createdAt+"')";
+    });
     out.push("INSERT INTO /* KI_HINT_UPDATE_ON_EXISTING_PK */ "+t+"\n"+cols+"\nVALUES\n"+rows.join(",\n"));
   }
   return out;
@@ -1124,7 +1129,7 @@ function membershipQuery(table, docIds){
 }
 function edgeAccumQuery(table, names){
   const l = inList(names,"str");
-  return "SELECT node1, node2, sum_wv, sum_w FROM "+table+" WHERE node1 IN "+l+" OR node2 IN "+l;
+  return "SELECT node1, node2, edge_label, sum_wv, sum_w FROM "+table+" WHERE node1 IN "+l+" OR node2 IN "+l;
 }
 function nodeBlockQuery(table, keys){
   return "SELECT node, label, doc_ids, doc_count, aliases, block_key FROM "+table+" WHERE block_key IN "+inList(keys,"str");
