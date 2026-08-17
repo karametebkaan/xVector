@@ -943,12 +943,6 @@ function cosineOf(a, b){
   for (let i=0;i<n;i++) s += a[i]*b[i];
   return s;
 }
-function edgeType(la, lb){
-  const p = (la === "Person") + (lb === "Person");
-  if (p === 2) return "person-person";
-  if (p === 0) return "business-business";
-  return "person-business";
-}
 function edgeDelta(cos, eps){
   eps = (eps === undefined) ? 1e-6 : eps;
   const d = 1 - cos;
@@ -967,10 +961,9 @@ function docPairContributions(pairs, membership){
     if (na === nb) return;
     const flip = nb < na;
     const n1 = flip ? nb : na, n2 = flip ? na : nb;
-    const l1 = flip ? lb : la, l2 = flip ? la : lb;
     const key = n1+"\u0000"+n2;
     let cur = acc.get(key);
-    if (!cur){ cur = {node1:n1, node2:n2, type: edgeType(l1,l2), d_wv:0, d_w:0}; acc.set(key,cur); }
+    if (!cur){ cur = {node1:n1, node2:n2, label:"EMBEDDED", edge_kind:"embedded", d_wv:0, d_w:0}; acc.set(key,cur); }
     cur.d_wv += del.wv; cur.d_w += del.w;
   };
   for (const p of pairs){
@@ -1008,7 +1001,7 @@ function computeEdges(entities, docVec, eps){
       if (sumW === 0) continue;
       const weight = sumWV / sumW;
       const [n1, n2] = A.name < B.name ? [A.name, B.name] : [B.name, A.name];
-      edges.push({ node1: n1, node2: n2, type: edgeType(A.label, B.label), weight, sum_wv: sumWV, sum_w: sumW });
+      edges.push({ node1: n1, node2: n2, label: "EMBEDDED", edge_kind: "embedded", weight, sum_wv: sumWV, sum_w: sumW });
     }
   }
   edges.sort((x,y) => y.weight - x.weight);
@@ -1043,12 +1036,14 @@ function graphDdl(opts){
   const edges = head("edges")+"\n(\n"+
     "    node1  CHAR(64) NOT NULL,\n"+
     "    node2  CHAR(64) NOT NULL,\n"+
-    "    label  VARCHAR[] NOT NULL,\n"+
+    "    label      VARCHAR[] NOT NULL,\n"+
+    "    edge_label CHAR(32) NOT NULL,\n"+
+    "    edge_kind  CHAR(16) NOT NULL,\n"+
     "    weight FLOAT NOT NULL,\n"+
     "    sum_wv DOUBLE,\n"+
     "    sum_w  DOUBLE,\n"+
     "    created_at TIMESTAMP NOT NULL,\n"+
-    "    PRIMARY KEY (node1, node2)\n)";
+    "    PRIMARY KEY (node1, node2, edge_label)\n)";
   return { nodes, edges };
 }
 function membershipDdl(opts){

@@ -151,13 +151,6 @@ test("cosineOf is the dot product", () => {
   assert.equal(core.cosineOf([1,0],[0,1]), 0);
 });
 
-test("edgeType orders labels canonically", () => {
-  assert.equal(core.edgeType("Person","Person"), "person-person");
-  assert.equal(core.edgeType("Business","Business"), "business-business");
-  assert.equal(core.edgeType("Business","Person"), "person-business");
-  assert.equal(core.edgeType("Person","Business"), "person-business");
-});
-
 test("computeEdges: identical single-doc vectors give weight ~1", () => {
   const ents = [
     {name:"A",label:"Person",docIds:[1]},
@@ -168,7 +161,8 @@ test("computeEdges: identical single-doc vectors give weight ~1", () => {
   assert.equal(e.length, 1);
   assert.ok(Math.abs(e[0].weight - 1) < 1e-3, "weight ~1");
   assert.equal(e[0].node1, "A"); assert.equal(e[0].node2, "B");
-  assert.equal(e[0].type, "person-person");
+  assert.equal(e[0].label, "EMBEDDED");
+  assert.equal(e[0].edge_kind, "embedded");
 });
 
 test("computeEdges: orthogonal vectors give weight ~0.5", () => {
@@ -176,7 +170,6 @@ test("computeEdges: orthogonal vectors give weight ~0.5", () => {
   const dv = new Map([[1,[1,0]],[2,[0,1]]]);
   const e = core.computeEdges(ents, dv);
   assert.ok(Math.abs(e[0].weight - 0.5) < 1e-3, "weight ~0.5");
-  assert.equal(e[0].type, "person-business");
 });
 
 test("computeEdges: co-occurrence in same doc gives weight ~1", () => {
@@ -184,6 +177,14 @@ test("computeEdges: co-occurrence in same doc gives weight ~1", () => {
   const dv = new Map([[1,[0.6,0.8]]]);
   const e = core.computeEdges(ents, dv);
   assert.ok(Math.abs(e[0].weight - 1) < 1e-6);
+});
+
+test("computeEdges emits EMBEDDED layer labels", () => {
+  const ents = [{name:"A",label:"People",docIds:[1]},{name:"B",label:"People",docIds:[2]}];
+  const e = core.computeEdges(ents, new Map([[1,[1,0]],[2,[1,0]]]));
+  assert.equal(e[0].label, "EMBEDDED");
+  assert.equal(e[0].edge_kind, "embedded");
+  assert.equal(e[0].type, undefined);
 });
 
 test("filterEdges keeps weight >= threshold", () => {
@@ -353,7 +354,8 @@ test("docPairContributions: cross-doc pair expands to ordered entity edge", () =
   const out = core.docPairContributions([{i:1,j:2,cos:0.5}], mem);
   assert.equal(out.length, 1);
   assert.equal(out[0].node1, "A"); assert.equal(out[0].node2, "Z");
-  assert.equal(out[0].type, "person-business");
+  assert.equal(out[0].label, "EMBEDDED");
+  assert.equal(out[0].edge_kind, "embedded");
   assert.ok(out[0].d_w > 0 && out[0].d_wv > 0);
 });
 
@@ -362,7 +364,8 @@ test("docPairContributions: same-doc self pair uses cos=1 co-occurrence", () => 
   const out = core.docPairContributions([{i:1,j:1,cos:0}], mem);
   assert.equal(out.length, 1);
   assert.equal(out[0].node1, "A"); assert.equal(out[0].node2, "B");
-  assert.equal(out[0].type, "person-person");
+  assert.equal(out[0].label, "EMBEDDED");
+  assert.equal(out[0].edge_kind, "embedded");
   assert.ok(Math.abs(out[0].d_wv - out[0].d_w) < 1e-6);   // v=1 => wv==w
 });
 
@@ -383,13 +386,14 @@ test("computeEdges now also returns sum_wv and sum_w", () => {
   assert.ok(Math.abs(e[0].sum_wv / e[0].sum_w - e[0].weight) < 1e-12);
 });
 
-test("graphDdl v2 adds block_key, edge accumulators, and primary keys", () => {
+test("graphDdl v2 adds block_key, edge accumulators, edge_kind, and primary keys", () => {
   const d = core.graphDdl(OPTS);
   assert.match(d.nodes, /block_key\s+CHAR\(64\)/);
   assert.match(d.nodes, /PRIMARY KEY \(node\)/);
+  assert.match(d.edges, /edge_label\s+CHAR\(32\) NOT NULL/);
+  assert.match(d.edges, /edge_kind\s+CHAR\(16\) NOT NULL/);
   assert.match(d.edges, /sum_wv\s+DOUBLE/);
-  assert.match(d.edges, /sum_w\s+DOUBLE/);
-  assert.match(d.edges, /PRIMARY KEY \(node1, node2\)/);
+  assert.match(d.edges, /PRIMARY KEY \(node1, node2, edge_label\)/);
 });
 
 test("membershipDdl emits node/doc_id/label bridge table", () => {
