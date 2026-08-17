@@ -23,9 +23,9 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROUTES = {}  # populated in main(): {prefix: target_base}
-CLAUDE_BIN = "claude"
 GCP_PROJECT = ""
 GCP_REGION = "global"
+CLAUDE_MODEL_DEFAULT = "claude-haiku-4-5-20251001"
 
 
 def resolve_upstream(path, routes):
@@ -43,49 +43,93 @@ def resolve_upstream(path, routes):
     return target.rstrip("/") + path[len(prefix):]
 
 
-def _default_run(cmd, stdin_bytes, timeout):
-    return subprocess.run(cmd, input=stdin_bytes, capture_output=True, timeout=timeout)
+def _vertex_model_id(model):
+    """Vertex names dated models `alias@YYYYMMDD`; undated aliases pass through.
+    `claude-haiku-4-5-20251001` -> `claude-haiku-4-5@20251001`; `claude-opus-4-8`
+    unchanged. Without this the publisher endpoint 404s on a dated id."""
+    return re.sub(r"-(\d{8})$", r"@\1", model or "")
 
 
-def run_claude(prompt, schema, model, claude_bin="claude", timeout=180, _run=None):
-    """Shell the claude CLI (stored login) for one schema-constrained call.
-    Returns {"status":"OK","data":<structured_output>} or {"status":"ERROR","message":...}."""
-    cmd = [claude_bin, "-p", "--output-format", "json"]
-    if schema is not None:
-        cmd += ["--json-schema", json.dumps(schema)]
-    if model:
-        cmd += ["--model", model]
-    run = _run or _default_run
+def _extract_json(text):
+    """Return the first complete JSON object/array embedded in text, or None.
+    Tolerates markdown fences and trailing prose by scanning for a value the
+    strict decoder can consume — the model is prompted for JSON, not forced."""
+    if not text:
+        return None
+    dec = json.JSONDecoder()
+    for i, ch in enumerate(text):
+        if ch not in "{[":
+            continue
+        try:
+            obj, _ = dec.raw_decode(text[i:])
+            return obj
+        except ValueError:
+            continue
+    return None
+
+
+def run_claude(prompt, schema, model, project, region="global", timeout=180,
+               _token=None, _post=None):
+    """One Anthropic-on-Vertex call via REST (rawPredict) using an ADC access
+    token. The prompt carries the JSON contract; we parse the returned text
+    (schema is the parse-JSON signal, not server-enforced). Returns
+    {"status":"OK","data":<obj|text>} or {"status":"ERROR","message":...}."""
+    token = _token if _token is not None else _gcloud_token()
+    if not token:
+        return {"status": "ERROR", "message": "no gcloud token — run `gcloud auth application-default login`"}
+    vid = _vertex_model_id(model or CLAUDE_MODEL_DEFAULT)
+    if not re.match(r"^[\w.@-]+$", vid):
+        return {"status": "ERROR", "message": "invalid model"}
+    loc = region or "global"
+    host = "aiplatform.googleapis.com" if loc == "global" else "%s-aiplatform.googleapis.com" % loc
+    url = ("https://%s/v1/projects/%s/locations/%s/publishers/anthropic/models/%s:rawPredict"
+           % (host, project, loc, vid))
+    body = json.dumps({
+        "anthropic_version": "vertex-2023-10-16",
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 8192,
+    }).encode()
+    post = _post or _default_post
     try:
-        proc = run(cmd, (prompt or "").encode(), timeout)
-    except subprocess.TimeoutExpired:
-        return {"status": "ERROR", "message": "claude CLI timed out after %ds" % timeout}
-    except FileNotFoundError:
-        return {"status": "ERROR", "message": "claude CLI not found (set --claude-bin)"}
+        raw = post(url, body, token, timeout)
     except Exception as e:  # noqa: BLE001
-        return {"status": "ERROR", "message": "claude CLI failed: %s" % e}
+        return {"status": "ERROR", "message": "Claude request failed: %s" % e}
     try:
-        obj = json.loads((proc.stdout or b"").decode() or "{}")
+        obj = json.loads((raw or b"").decode())
     except Exception:  # noqa: BLE001
-        tail = ((proc.stderr or b"") or (proc.stdout or b"")).decode(errors="replace")[:400]
-        return {"status": "ERROR", "message": "claude CLI non-JSON output: %s" % tail}
-    if proc.returncode != 0 or obj.get("is_error"):
-        return {"status": "ERROR", "message": obj.get("result") or "claude CLI error"}
-    so = obj.get("structured_output")
-    if so is None:
-        return {"status": "ERROR", "message": "claude CLI returned no structured_output"}
-    return {"status": "OK", "data": so}
+        return {"status": "ERROR", "message": "Claude non-JSON response: %s" % (raw or b"")[:300]}
+    if isinstance(obj, list):
+        obj = obj[0] if obj else {}   # Vertex may wrap the message in a 1-element list
+    if isinstance(obj, dict) and "error" in obj:
+        err = obj["error"]
+        return {"status": "ERROR", "message": str(err.get("message") if isinstance(err, dict) else err)}
+    try:
+        blocks = obj["content"]
+        text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+    except Exception:  # noqa: BLE001
+        return {"status": "ERROR", "message": "Claude unexpected shape: %s" % json.dumps(obj)[:300]}
+    if schema is None:
+        return {"status": "OK", "data": text}
+    data = _extract_json(text)
+    if data is None:
+        return {"status": "ERROR", "message": "Claude content was not JSON: %s" % str(text)[:300]}
+    return {"status": "OK", "data": data}
 
 
 def _gcloud_token():
-    try:
-        p = subprocess.run(["gcloud", "auth", "print-access-token"],
-                           capture_output=True, timeout=30)
-    except Exception:  # noqa: BLE001
-        return None
-    if p.returncode != 0:
-        return None
-    return (p.stdout or b"").decode().strip()
+    """Access token for Vertex. Prefers Application Default Credentials; falls
+    back to the user-login token if ADC is unset."""
+    for cmd in (["gcloud", "auth", "application-default", "print-access-token"],
+                ["gcloud", "auth", "print-access-token"]):
+        try:
+            p = subprocess.run(cmd, capture_output=True, timeout=30)
+        except Exception:  # noqa: BLE001
+            continue
+        if p.returncode == 0:
+            tok = (p.stdout or b"").decode().strip()
+            if tok:
+                return tok
+    return None
 
 
 def _gcloud_project():
@@ -197,7 +241,7 @@ class Handler(SimpleHTTPRequestHandler):
         except Exception as e:  # noqa: BLE001
             return self._send_json(400, {"status": "ERROR", "message": "bad request body: %s" % e})
         out = run_claude(req.get("prompt") or "", req.get("schema"),
-                         req.get("model") or "", claude_bin=CLAUDE_BIN)
+                         req.get("model") or "", GCP_PROJECT, GCP_REGION)
         self._send_json(200 if out.get("status") != "ERROR" else 502, out)
 
     def _gemini(self):
@@ -234,7 +278,7 @@ class Handler(SimpleHTTPRequestHandler):
 
 
 def main():
-    global ROUTES, CLAUDE_BIN, GCP_PROJECT, GCP_REGION
+    global ROUTES, GCP_PROJECT, GCP_REGION
     p = argparse.ArgumentParser(description="Serve xVector with Kinetica + Ollama proxies.")
     p.add_argument("--port", type=int, default=8000)
     p.add_argument("--host", default="127.0.0.1")
@@ -242,15 +286,16 @@ def main():
                    help="Kinetica instance URL")
     p.add_argument("--ollama", default=os.environ.get("OLLAMA_URL", "http://localhost:11434"),
                    help="Ollama base URL")
-    p.add_argument("--claude-bin", default=os.environ.get("CLAUDE_BIN", "claude"),
-                   help="Path to the claude CLI binary")
-    p.add_argument("--gcp-project", default=os.environ.get("GOOGLE_CLOUD_PROJECT", ""),
-                   help="GCP project for Gemini/Vertex (default: gcloud config project)")
-    p.add_argument("--gcp-region", default=os.environ.get("GOOGLE_CLOUD_LOCATION", "global"),
-                   help="Vertex region for Gemini")
+    p.add_argument("--gcp-project",
+                   default=(os.environ.get("GOOGLE_CLOUD_PROJECT")
+                            or os.environ.get("ANTHROPIC_VERTEX_PROJECT_ID") or ""),
+                   help="GCP project for Claude/Gemini on Vertex (default: gcloud config project)")
+    p.add_argument("--gcp-region",
+                   default=(os.environ.get("GOOGLE_CLOUD_LOCATION")
+                            or os.environ.get("CLOUD_ML_REGION") or "global"),
+                   help="Vertex region for Claude/Gemini")
     args = p.parse_args()
     ROUTES = {"/kinetica": args.kinetica, "/ollama": args.ollama}
-    CLAUDE_BIN = args.claude_bin
     GCP_PROJECT = args.gcp_project or _gcloud_project()
     GCP_REGION = args.gcp_region
 
@@ -258,8 +303,8 @@ def main():
     print("xVector   http://%s:%d" % (args.host, args.port))
     print("Kinetica  %s  →  proxied at /kinetica" % args.kinetica)
     print("Ollama    %s  →  proxied at /ollama" % args.ollama)
-    print("Claude    %s  →  /claude (stored login)" % args.claude_bin)
-    print("Gemini    Vertex %s/%s  →  /gemini (gcloud login)" % (GCP_PROJECT or "?", GCP_REGION))
+    print("Claude    Vertex %s/%s  →  /claude (ADC)" % (GCP_PROJECT or "?", GCP_REGION))
+    print("Gemini    Vertex %s/%s  →  /gemini (ADC)" % (GCP_PROJECT or "?", GCP_REGION))
     print("Set the app's Instance URL to /kinetica\n")
     try:
         server.serve_forever()

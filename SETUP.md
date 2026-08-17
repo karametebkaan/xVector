@@ -72,35 +72,39 @@ python3 scripts/serve.py --port 8181 --kinetica http://localhost:9191 --ollama h
 
 ## 5. LLM providers for extraction
 
-The app supports two LLM providers for entity extraction and relation inference. Choose one:
+The app supports two LLM providers for entity extraction and relation inference. Both run
+on **Vertex AI** and share one credential — Application Default Credentials (ADC). No API
+key ever reaches the browser: `serve.py` mints a short-lived access token and calls Vertex
+directly from the same origin.
 
-### Claude (Anthropic)
-
-Requires a logged-in `claude` CLI (stored login). Install the Claude CLI and run:
-
-```bash
-claude login
-```
-
-The app routes extraction to the `/claude` endpoint using the stored login. No API key in the browser.
-Model options: `claude-haiku-4-5-20251001` (fast) or `claude-opus-4-8` (best).
-
-### Gemini (Google)
-
-Requires `gcloud auth login` and a GCP project. Set up once with:
+Set up ADC and a project once:
 
 ```bash
-gcloud auth login
+gcloud auth application-default login
 gcloud config set project <your-project-id>
 ```
 
-Launch the server with:
+Then launch the server pointed at your Vertex project:
 
 ```bash
-python3 scripts/serve.py --port 8181 --gcp-project <your-project-id>
+python3 scripts/serve.py --port 8181 --gcp-project <your-project-id> --gcp-region global
 ```
 
-The app routes extraction to the `/gemini` endpoint via Vertex. Model options: `gemini-2.5-flash` (fast) or `gemini-2.5-pro` (best).
+(`--gcp-project`/`--gcp-region` also read `GOOGLE_CLOUD_PROJECT`/`ANTHROPIC_VERTEX_PROJECT_ID`
+and `GOOGLE_CLOUD_LOCATION`/`CLOUD_ML_REGION`. Region defaults to `global`.)
+
+### Claude (Anthropic on Vertex)
+
+Extraction routes to `/claude`, which POSTs the Vertex Anthropic `:rawPredict` endpoint via
+REST (`urllib`, stdlib only — no SDK). Model options: `claude-haiku-4-5-20251001` (fast) or
+`claude-opus-4-8` (best). Dated model ids are translated to Vertex's `alias@YYYYMMDD` form
+automatically. This is markedly faster than the old `claude` CLI subprocess, which reloaded a
+large agent system prompt on every call.
+
+### Gemini (Google on Vertex)
+
+Extraction routes to `/gemini`, which POSTs the Vertex `:generateContent` endpoint. Model
+options: `gemini-2.5-flash` (fast) or `gemini-2.5-pro` (best).
 
 ## 6. Verifying embeddings and extraction
 

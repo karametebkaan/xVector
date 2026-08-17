@@ -101,11 +101,17 @@ Three disambiguation modes fold these into canonical entities `{name, label, doc
 - **None** (exact-match) — only identical-cased strings merge; each variant is a separate entity.
 - **External API** — `resolveApi()` POSTs to a custom endpoint and falls back to heuristic on error.
 
-The Claude provider uses the `/claude` route (CLI subprocess, stored login) with models
-`claude-haiku-4-5-20251001` (fast) or `claude-opus-4-8` (best). The Gemini provider uses
-the `/gemini` route (Vertex REST via gcloud token) with models `gemini-2.5-flash` (fast)
-or `gemini-2.5-pro` (best). Both providers return mentions and relations in a single JSON
-call, with `foldExtraction()` normalizing the response shape. Relations are a closed
+Both providers run on Vertex AI and share one credential (Application Default Credentials);
+`serve.py` calls Vertex over REST with `urllib` (stdlib only, no SDK) and never exposes a key
+to the browser. The Claude provider uses the `/claude` route (Vertex Anthropic `:rawPredict`,
+`run_claude()`) with models `claude-haiku-4-5-20251001` (fast) or `claude-opus-4-8` (best);
+`_vertex_model_id()` rewrites dated ids to Vertex's `alias@YYYYMMDD` form, and `_extract_json()`
+pulls the JSON object out of the model's text (the prompt asks for JSON; the endpoint does not
+enforce a schema). The Gemini provider uses the `/gemini` route (Vertex `:generateContent`,
+`run_gemini()`) with models `gemini-2.5-flash` (fast) or `gemini-2.5-pro` (best). This REST
+transport replaced the earlier `claude` CLI subprocess, which reloaded a large agent system
+prompt per call and was the source of extraction slowness. Both providers return mentions and
+relations in a single JSON call, with `foldExtraction()` normalizing the response shape. Relations are a closed
 predicate vocabulary: WORKS_AT, FOUNDED, LEADS, MEMBER_OF, LOCATED_IN, HEADQUARTERED_IN,
 PART_OF, OWNS, AFFILIATED_WITH, VISITED, RELATED_TO (and `normPredicate()` maps unknown
 predicates to RELATED_TO). Ollama *embeddings* remain (model discovery, embedding round-trip);

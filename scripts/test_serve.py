@@ -1,7 +1,6 @@
 import json
 import os
 import sys
-import types
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -47,50 +46,115 @@ class ResolveUpstream(unittest.TestCase):
         self.assertIsNone(serve.resolve_upstream("/kineticax/y", ROUTES))
 
 
+class VertexModelId(unittest.TestCase):
+    def test_dated_model_gets_at_sign(self):
+        self.assertEqual(serve._vertex_model_id("claude-haiku-4-5-20251001"),
+                         "claude-haiku-4-5@20251001")
+
+    def test_undated_alias_passes_through(self):
+        self.assertEqual(serve._vertex_model_id("claude-opus-4-8"), "claude-opus-4-8")
+
+    def test_empty_is_empty(self):
+        self.assertEqual(serve._vertex_model_id(""), "")
+
+
+class ExtractJson(unittest.TestCase):
+    def test_bare_object(self):
+        self.assertEqual(serve._extract_json('{"a":1}'), {"a": 1})
+
+    def test_fenced_with_prose(self):
+        text = 'Here you go:\n```json\n{"entities":[],"relations":[]}\n```\nDone.'
+        self.assertEqual(serve._extract_json(text), {"entities": [], "relations": []})
+
+    def test_trailing_text_after_object(self):
+        self.assertEqual(serve._extract_json('{"a":1} and more'), {"a": 1})
+
+    def test_no_json_returns_none(self):
+        self.assertIsNone(serve._extract_json("no json here"))
+
+    def test_empty_returns_none(self):
+        self.assertIsNone(serve._extract_json(""))
+
+
 class RunClaude(unittest.TestCase):
-    def _fake_run(self, returncode, stdout, stderr=b""):
-        def run(cmd, stdin_bytes, timeout):
-            self.captured = {"cmd": cmd, "stdin": stdin_bytes, "timeout": timeout}
-            return types.SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
-        return run
+    def _claude_body(self, text):
+        return json.dumps({"content": [{"type": "text", "text": text}]}).encode()
 
-    def test_success_returns_structured_output(self):
-        out = json.dumps({"is_error": False, "structured_output": {"entities": [], "relations": []}}).encode()
-        r = serve.run_claude("hi", {"type": "object"}, "claude-haiku-4-5-20251001", _run=self._fake_run(0, out))
+    def test_success_parses_content_json(self):
+        captured = {}
+        def post(url, body, token, timeout):
+            captured["url"] = url; captured["token"] = token; captured["body"] = body
+            return self._claude_body('{"entities":[{"name":"Kaan","label":"People"}],"relations":[]}')
+        r = serve.run_claude("prompt", {"type": "object"}, "claude-haiku-4-5-20251001",
+                             "proj-x", "global", _token="tok-123", _post=post)
         self.assertEqual(r["status"], "OK")
-        self.assertEqual(r["data"], {"entities": [], "relations": []})
-        self.assertIn("--json-schema", self.captured["cmd"])
-        self.assertIn("--model", self.captured["cmd"])
-        self.assertEqual(self.captured["stdin"], b"hi")
+        self.assertEqual(r["data"]["entities"][0]["name"], "Kaan")
+        self.assertIn("aiplatform.googleapis.com", captured["url"])
+        self.assertIn("projects/proj-x/locations/global", captured["url"])
+        self.assertIn("publishers/anthropic/models/claude-haiku-4-5@20251001:rawPredict",
+                      captured["url"])
+        self.assertEqual(captured["token"], "tok-123")
+        self.assertIn(b"vertex-2023-10-16", captured["body"])
 
-    def test_no_schema_omits_flag(self):
-        out = json.dumps({"is_error": False, "structured_output": {}}).encode()
-        serve.run_claude("hi", None, "", _run=self._fake_run(0, out))
-        self.assertNotIn("--json-schema", self.captured["cmd"])
-        self.assertNotIn("--model", self.captured["cmd"])
+    def test_regional_host(self):
+        def post(url, body, token, timeout):
+            self.assertTrue(url.startswith("https://us-east5-aiplatform.googleapis.com/"))
+            return self._claude_body("{}")
+        serve.run_claude("p", {"type": "object"}, "claude-opus-4-8", "proj", "us-east5",
+                         _token="t", _post=post)
 
-    def test_is_error_true_returns_error(self):
-        out = json.dumps({"is_error": True, "result": "model not found"}).encode()
-        r = serve.run_claude("hi", None, "bad", _run=self._fake_run(1, out))
+    def test_default_model_when_blank(self):
+        def post(url, body, token, timeout):
+            self.assertIn("claude-haiku-4-5@20251001:rawPredict", url)
+            return self._claude_body("{}")
+        serve.run_claude("p", {"type": "object"}, "", "proj", "global", _token="t", _post=post)
+
+    def test_no_schema_returns_raw_text(self):
+        def post(url, body, token, timeout):
+            return self._claude_body("just words, not json")
+        r = serve.run_claude("p", None, "claude-opus-4-8", "proj", "global",
+                             _token="t", _post=post)
+        self.assertEqual(r["status"], "OK")
+        self.assertEqual(r["data"], "just words, not json")
+
+    def test_no_token_returns_error(self):
+        r = serve.run_claude("p", None, "claude-opus-4-8", "proj", "global",
+                             _token="", _post=lambda *a: b"{}")
+        self.assertEqual(r["status"], "ERROR")
+        self.assertIn("gcloud", r["message"])
+
+    def test_vertex_error_body_surfaces_message(self):
+        def post(url, body, token, timeout):
+            return json.dumps({"error": {"message": "model not found"}}).encode()
+        r = serve.run_claude("p", None, "bad-model", "proj", "global", _token="t", _post=post)
         self.assertEqual(r["status"], "ERROR")
         self.assertIn("model not found", r["message"])
 
-    def test_non_json_stdout_returns_error(self):
-        r = serve.run_claude("hi", None, "m", _run=self._fake_run(0, b"not json", b"boom"))
+    def test_content_not_json_returns_error(self):
+        def post(url, body, token, timeout):
+            return self._claude_body("this is not json")
+        r = serve.run_claude("p", {"type": "object"}, "claude-opus-4-8", "proj", "global",
+                             _token="t", _post=post)
         self.assertEqual(r["status"], "ERROR")
-        self.assertIn("non-JSON", r["message"])
+        self.assertIn("not JSON", r["message"])
 
-    def test_missing_structured_output_returns_error(self):
-        out = json.dumps({"is_error": False}).encode()
-        r = serve.run_claude("hi", None, "m", _run=self._fake_run(0, out))
-        self.assertEqual(r["status"], "ERROR")
+    def test_list_wrapped_response(self):
+        def post(url, body, token, timeout):
+            return json.dumps([{"content": [{"type": "text", "text": '{"ok":1}'}]}]).encode()
+        r = serve.run_claude("p", {"type": "object"}, "claude-opus-4-8", "proj", "global",
+                             _token="t", _post=post)
+        self.assertEqual(r["status"], "OK")
+        self.assertEqual(r["data"], {"ok": 1})
 
-    def test_binary_not_found_returns_error(self):
-        def run(cmd, stdin_bytes, timeout):
-            raise FileNotFoundError("no claude")
-        r = serve.run_claude("hi", None, "m", _run=run)
+    def test_invalid_model_rejected_before_post(self):
+        called = {"n": 0}
+        def post(url, body, token, timeout):
+            called["n"] += 1
+            return self._claude_body("{}")
+        r = serve.run_claude("p", None, "a/b", "proj", "global", _token="t", _post=post)
         self.assertEqual(r["status"], "ERROR")
-        self.assertIn("not found", r["message"])
+        self.assertIn("invalid model", r["message"])
+        self.assertEqual(called["n"], 0)
 
 
 class RunGemini(unittest.TestCase):
