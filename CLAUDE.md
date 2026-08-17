@@ -38,11 +38,13 @@ Six stages, each a small set of functions in the `<script>` block:
 2. **Embed** — `embedLocal()`, `embedRemote()`, or `embedOllama()` returns `{vec: Float64Array(64), tokens}`
    per document. Results live in the module-level `DOCS` array as
    `{id, text, tokens, vec}`.
-3. **Extract entities** — `extractLocalMentions()` or `extractLLM()` returns mentions
-   `{surface, label, docId}`. These are disambiguated into canonical entities
-   `{name, label, docIds, count, aliases}` living in the `ENTITIES` array.
-4. **Build graph** — `computeEdges()` returns `{node1, node2, type, weight}` edges
-   stored in the `EDGES` array, filtered by a threshold slider at render time.
+3. **Extract entities & relations** — `extractLocalMentions()` or `extractLLM()` returns mentions
+   `{surface, label, docId}` and relations `{node1, node2, predicate, docId}` in a combined call.
+   Mentions are disambiguated into canonical entities `{name, label, docIds, count, aliases}`
+   living in the `ENTITIES` array; relations are stored in the `RELATIONS` array.
+4. **Build graph** — `computeEdges()` (for similarity) and `buildRelationEdges()` (for relations)
+   return `{node1, node2, label, edge_kind, weight}` edges stored in the `EDGES` array,
+   filtered by a threshold slider at render time.
 5. **Emit SQL** — `ddl()`, `insertStatements()`, `graphDdl()`, `nodeInserts()`,
    `edgeInserts()`, and `graphScript()` build the statements. `fullScript()` joins them
    for Copy SQL / Download .sql. These are the single source of truth for the schema;
@@ -81,44 +83,55 @@ the `/ollama` proxy route (configured with `--ollama http://localhost:11434`) ha
 GET and POST, mirroring the `/kinetica` proxy to sidestep CORS. The reduce "ask" option,
 if selected, is treated as a projection (no lookup request necessary).
 
-### Entity extraction and disambiguation
+### Entity extraction and relation inference
 
 The local heuristic extractor, `extractLocalMentions()`, is a stand-in for real NER, exactly
 as the local hash embedder stands in for a real model. It parses Capitalized noun phrases,
-strips titles and articles, and classifies each span as Person (2+ tokens or title-prefixed)
-or Business (contains biz-word suffix or 2+ letter acronym). Results are mentions
-`{surface, label, docId}` — many variants of the same entity across documents.
+strips titles and articles, and classifies each span into five types: **People** (2+ tokens or
+title-prefixed), **Business** (biz-word suffix or 2+ letter acronym), **Organization** (org-word
+keyword), **Facility** (facility-word keyword), or **Location** (gazetteered place name). Results
+are mentions `{surface, label, docId}` — many variants of the same entity across documents.
 
 Three disambiguation modes fold these into canonical entities `{name, label, docIds, count, aliases}`:
 
-- **Ad-hoc heuristic** (default) — persons merge by surname compatibility and given-name
-  initials; businesses merge by suffix-stripped core. Merged variants appear as aliases, and
-  the longest variant becomes the canonical name.
+- **Ad-hoc heuristic** (default) — within each type, entities merge by surname compatibility
+  (People), suffix-stripped core (Business), or keyword-stripped core (Organization/Facility/Location).
+  Merged variants appear as aliases, and the longest variant becomes the canonical name.
 - **None** (exact-match) — only identical-cased strings merge; each variant is a separate entity.
 - **External API** — `resolveApi()` POSTs to a custom endpoint and falls back to heuristic on error.
 
-The Ollama transport option for extraction uses `/ollama/api/chat` with the same 2-type
-(Person / Business) prompt, returning mentions in the `[{surface, label, docId}]` shape via
-`extractLLM()` with `format:"json"` and streaming disabled.
+The Claude provider uses the `/claude` route (CLI subprocess, stored login) with models
+`claude-haiku-4-5-20251001` (fast) or `claude-opus-4-8` (best). The Gemini provider uses
+the `/gemini` route (Vertex REST via gcloud token) with models `gemini-2.5-flash` (fast)
+or `gemini-2.5-pro` (best). Both providers return mentions and relations in a single JSON
+call, with `foldExtraction()` normalizing the response shape. Relations are a closed
+predicate vocabulary: WORKS_AT, FOUNDED, LEADS, MEMBER_OF, LOCATED_IN, HEADQUARTERED_IN,
+PART_OF, OWNS, AFFILIATED_WITH, VISITED, RELATED_TO (and `normPredicate()` maps unknown
+predicates to RELATED_TO). Ollama *embeddings* remain (model discovery, embedding round-trip);
+Ollama *chat extraction* is retired.
 
 ### Graph edges and tables
 
-Edge weights use True-IDW per document pair: given cos = dot(a,b), d = 1−cos, w = 1/(ε+d)
-with ε=10⁻⁶, and v = (1+cos)/2, the edge weight is Σ(w·v)/Σ(w) ∈ (0,1]. Same-document
-co-occurrence yields weight ≈ 1 (documents are identical vectors). The threshold slider
-(default 0.5) filters edges at render/store time only; it does not affect weight computation.
+Edges are a two-layer multigraph: **similarity edges** (EMBEDDED, computed via True-IDW per
+document pair) and **relation edges** (LLM predicates, weight 1.0). Similarity edge weights use
+True-IDW: given cos = dot(a,b), d = 1−cos, w = 1/(ε+d) with ε=10⁻⁶, and v = (1+cos)/2, the
+edge weight is Σ(w·v)/Σ(w) ∈ (0,1]. Same-document co-occurrence yields weight ≈ 1 (documents
+are identical vectors). The threshold slider (default 0.5) filters edges at render/store time
+only; it does not affect weight computation. Relation edges always have weight 1.0.
 
 The grammar-aligned tables match Kinetica's ARRAY and CHAR types:
 - **Node table** `graph_nodes_<datestamp>`: `node CHAR(64)` (canonical entity name), `label
-  VARCHAR[]` (ARRAY['Person'] or ARRAY['Business']), `doc_ids INT[]` (documents where the
-  entity appears, key for post-join), `doc_count INT`, `aliases VARCHAR[]` (merged variants),
-  `block_key CHAR(64)` (blocking key for incremental merging in append mode), `created_at TIMESTAMP`,
-  `PRIMARY KEY (node)`.
+  VARCHAR[]` (ARRAY['People'] | ARRAY['Business'] | ARRAY['Organization'] | ARRAY['Facility'] |
+  ARRAY['Location']), `doc_ids INT[]` (documents where the entity appears, key for post-join),
+  `doc_count INT`, `aliases VARCHAR[]` (merged variants), `block_key CHAR(64)` (blocking key for
+  incremental merging in append mode), `created_at TIMESTAMP`, `PRIMARY KEY (node)`.
 - **Edge table** `graph_edges_<datestamp>`: `node1` and `node2 CHAR(64)` (canonical names),
-  `label VARCHAR[]` (ARRAY['person-business'] | ARRAY['person-person'] | ARRAY['business-business']),
-  `weight FLOAT` (current IDW strength), `sum_wv DOUBLE` (cumulative numerator for incremental
-  recomputation), `sum_w DOUBLE` (cumulative denominator), `created_at TIMESTAMP`,
-  `PRIMARY KEY (node1, node2)`.
+  `label VARCHAR[]` (ARRAY['EMBEDDED'] for similarity or ARRAY['<PREDICATE>'] for relations),
+  `edge_label CHAR(32)` (edge classifier: 'EMBEDDED' or a predicate from the closed vocabulary),
+  `edge_kind CHAR(16)` (layer type: 'embedded' for similarity, 'relation' for LLM predicates),
+  `weight FLOAT` (IDW strength ∈ (0,1] for similarity; 1.0 for relations), `sum_wv DOUBLE`
+  (cumulative numerator for incremental recomputation), `sum_w DOUBLE` (cumulative denominator),
+  `created_at TIMESTAMP`, `PRIMARY KEY (node1, node2, edge_label)`.
 - **Membership table** `graph_membership_<datestamp>` (new in append mode): `node CHAR(64)`,
   `doc_id INT`, `label VARCHAR[]`. Maps entities to the documents they appear in, enabling
   efficient aggregation joins at scale: instead of `ARRAY_CONTAINS(doc_ids, doc_id)`, the join is
@@ -178,18 +191,25 @@ to review and edit all statements (including the `CREATE GRAPH`) before executio
 
 ### Palette extension
 
-Colors extend the existing per-vector strip convention. Indigo `--signal` represents People
-(Person labels), and amber `--warm` represents Business (Business labels). These are used
-in the Entities panel to visually distinguish entity types.
+Colors extend the existing per-vector strip convention to five entity types:
+- Indigo `--signal` for People
+- Amber `--warm` for Business
+- Teal `--org` for Organization
+- Plum `--facility` for Facility
+- Green `--loc` for Location
+
+These are used in the Entities panel and graph visualization to visually distinguish entity types.
 
 ### Testing the pure core functions
 
 `scripts/test_graph.mjs` (`node --test scripts/test_graph.mjs`) covers the pure core
 functions — `extractLocalMentions()`, `mergeMentions()`, `computeEdges()`, `blockKey()`,
-`mergeEdgeAccum()`, `resolveIncremental()`, `pickEmbeddings()`, and the SQL emitters — which
-are wrapped in `/* CORE:BEGIN */ … /* CORE:END */` markers so the stdlib-only harness can
-extract and eval them. These functions underpin both Recreate and Append workflows.
-`scripts/test_serve.py` covers the proxy route dispatcher `resolve_upstream()`.
+`mergeEdgeAccum()`, `resolveIncremental()`, `pickEmbeddings()`, `foldExtraction()`,
+`buildRelationEdges()`, `normLabel()`, `normPredicate()`, `classifySpan()` (five-type),
+and the SQL emitters — which are wrapped in `/* CORE:BEGIN */ … /* CORE:END */` markers so
+the stdlib-only harness can extract and eval them. These functions underpin both Recreate
+and Append workflows. `scripts/test_serve.py` covers the proxy route dispatcher
+`resolve_upstream()`, and the Claude/Gemini transport functions `run_claude()` and `run_gemini()`.
 
 ## Kinetica specifics worth not re-deriving
 
