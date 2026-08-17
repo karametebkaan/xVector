@@ -33,27 +33,72 @@ test("num formats to <=6 decimals", () => {
 test("extractLocalMentions finds person and business with title/suffix", () => {
   const m = core.extractLocalMentions([{id:1, text:"Dr Kaan Karamete leads Acme Corp."}]);
   assertNonStrict.deepEqual(m, [
-    {surface:"Kaan Karamete", label:"Person",   docId:1},
+    {surface:"Kaan Karamete", label:"People",   docId:1},
     {surface:"Acme Corp",     label:"Business", docId:1},
   ]);
 });
 
-test("extractLocalMentions keeps multiword orgs, strips leading article", () => {
+test("extractLocalMentions classifies a university as Organization", () => {
   const m = core.extractLocalMentions([{id:2, text:"The University of Texas hired Jane Doe."}]);
   assertNonStrict.deepEqual(m, [
-    {surface:"University of Texas", label:"Business", docId:2},
-    {surface:"Jane Doe",           label:"Person",   docId:2},
+    {surface:"University of Texas", label:"Organization", docId:2},
+    {surface:"Jane Doe",           label:"People",        docId:2},
   ]);
 });
 
 test("extractLocalMentions skips bare single tokens, keeps acronyms as business", () => {
-  const m = core.extractLocalMentions([{id:3, text:"Chicago is big. IBM announced results."}]);
+  const m = core.extractLocalMentions([{id:3, text:"Zzxq is odd. IBM announced results."}]);
   assertNonStrict.deepEqual(m, [{surface:"IBM", label:"Business", docId:3}]);
 });
 
 test("extractLocalMentions accepts title-preceded single surname as person", () => {
   const m = core.extractLocalMentions([{id:4, text:"President Obama spoke."}]);
-  assertNonStrict.deepEqual(m, [{surface:"Obama", label:"Person", docId:4}]);
+  assertNonStrict.deepEqual(m, [{surface:"Obama", label:"People", docId:4}]);
+});
+
+test("classifySpan returns each of the five types or null", () => {
+  const T = (s, flag) => core.classifySpan(s.split(" "), !!flag);
+  assert.equal(T("Acme Corp"), "Business");
+  assert.equal(T("JFK Airport"), "Facility");
+  assert.equal(T("State Department"), "Organization");
+  assert.equal(T("Brooklyn"), "Location");           // gazetteer hit
+  assert.equal(T("Jane Doe"), "People");
+  assert.equal(T("Obama", true), "People");           // title flag, single token
+  assert.equal(T("Xylophone"), null);                 // bare single token, no signal
+});
+
+test("classifySpan precedence: business suffix beats facility keyword", () => {
+  assert.equal(core.classifySpan("Airport Holdings Inc".split(" "), false), "Business");
+});
+
+test("normLabel folds synonyms onto the five types", () => {
+  assert.equal(core.normLabel("Person"), "People");
+  assert.equal(core.normLabel("people"), "People");
+  assert.equal(core.normLabel("Business"), "Business");
+  assert.equal(core.normLabel("company"), "Business");
+  assert.equal(core.normLabel("government agency"), "Organization");
+  assert.equal(core.normLabel("university"), "Organization");
+  assert.equal(core.normLabel("airport"), "Facility");
+  assert.equal(core.normLabel("city"), "Location");
+  assert.equal(core.normLabel("weird"), "People");     // default
+});
+
+test("normPredicate folds onto the closed vocabulary", () => {
+  assert.equal(core.normPredicate("WORKS_AT"), "WORKS_AT");
+  assert.equal(core.normPredicate("works at"), "WORKS_AT");
+  assert.equal(core.normPredicate("headquartered-in"), "HEADQUARTERED_IN");
+  assert.equal(core.normPredicate("mentors"), "RELATED_TO");
+  assert.equal(core.normPredicate(""), "RELATED_TO");
+});
+
+test("TYPES maps each label to a color var and strategy", () => {
+  assert.equal(core.TYPES.People.strategy, "person");
+  assert.equal(core.TYPES.Business.strategy, "core");
+  assert.equal(core.TYPES.Organization.strategy, "core");
+  assert.equal(core.TYPES.Facility.strategy, "norm");
+  assert.equal(core.TYPES.Location.strategy, "norm");
+  assert.equal(core.TYPES.People.colorVar, "--signal");
+  assert.equal(core.TYPES.Location.colorVar, "--loc");
 });
 
 test("normalizeName strips punctuation, case, possessive", () => {

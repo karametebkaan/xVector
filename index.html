@@ -14,6 +14,9 @@
     --signal:#4B2ED6;
     --signal-soft:#EDE9FD;
     --warm:#C97A19;
+    --org:#0E7C86;
+    --facility:#A6317D;
+    --loc:#3B7A2E;
     --good:#1F8A6D;
     --bad:#C4304A;
     --mono: ui-monospace, SFMono-Regular, Menlo, "Cascadia Mono", Consolas, "Liberation Mono", monospace;
@@ -742,8 +745,40 @@ function pickEmbeddings(json, expected){
 /* CORE:BEGIN */
 const TITLES = new Set(["mr","mrs","ms","miss","dr","prof","professor","president","ceo","cfo","cto","senator","governor","mayor","sir","lord","dame","rev","gen","col","capt","sgt","judge","justice"]);
 const ARTICLES = new Set(["the","a","an"]);
-const BIZ_WORDS = new Set(["inc","llc","ltd","corp","corporation","co","company","gmbh","plc","lp","llp","group","holdings","partners","systems","technologies","technology","labs","laboratories","bank","capital","ventures","university","college","institute","hospital","clinic","airport","station","stadium","museum","library","hotel","foundation","association","agency","department","ministry","committee","center","centre","school","church","factory","plant","mall","market","store","university"]);
 const CONNECTORS = new Set(["of","and","the","for","&"]);
+// Five-type ontology (single source of truth). colorVar -> :root CSS var; strategy -> disambiguation strategy.
+// Declared with var (not const) so the test harness's vm context exposes it as a property.
+var TYPES = {
+  People:       { colorVar:"--signal",   strategy:"person" },
+  Business:     { colorVar:"--warm",     strategy:"core"   },
+  Organization: { colorVar:"--org",      strategy:"core"   },
+  Facility:     { colorVar:"--facility", strategy:"norm"   },
+  Location:     { colorVar:"--loc",      strategy:"norm"   },
+};
+// Local-extractor keyword sets. Precedence: business suffix > facility > org > location > people.
+const BIZ_SUFFIX_WORDS = new Set(["inc","llc","ltd","corp","corporation","co","company","gmbh","plc","lp","llp","holdings","partners","ventures","capital"]);
+const FACILITY_WORDS = new Set(["airport","stadium","museum","hospital","clinic","hotel","station","mall","plant","factory","library","theater","theatre","arena","center","centre","terminal","port"]);
+const ORG_WORDS = new Set(["agency","department","ministry","committee","university","college","institute","school","foundation","association","bank","church","commission","bureau"]);
+// Small built-in gazetteer; anything not listed stays null rather than guessing.
+const LOCATIONS = new Set(["arlington","brooklyn","manhattan","vienna","paris","london","tokyo","berlin","madrid","rome","moscow","beijing","seattle","boston","denver","austin","dallas","houston","atlanta","miami","texas","california","virginia","germany","france","italy","japan","china","india","canada","mexico","brazil"]);
+const PREDICATES = new Set(["WORKS_AT","FOUNDED","LEADS","MEMBER_OF","LOCATED_IN","HEADQUARTERED_IN","PART_OF","OWNS","AFFILIATED_WITH","VISITED","RELATED_TO"]);
+function normLabel(v){
+  const s = String(v||"").trim().toLowerCase();
+  if (s === "people" || s === "person") return "People";
+  if (s === "business") return "Business";
+  if (s === "organization" || s === "organisation") return "Organization";
+  if (s === "facility") return "Facility";
+  if (s === "location") return "Location";
+  if (/busin|compan|corp|\binc\b|\bllc\b|firm/.test(s)) return "Business";
+  if (/organi|agenc|govern|\bngo\b|univers|college|institut|associat|ministr|departmen|committee|foundation|bank|church|school/.test(s)) return "Organization";
+  if (/facilit|airport|stadium|hospital|museum|plant|station|venue|arena|terminal|hotel|mall/.test(s)) return "Facility";
+  if (/locat|city|country|region|place|town|state|province/.test(s)) return "Location";
+  return "People";
+}
+function normPredicate(v){
+  const s = String(v||"").trim().toUpperCase().replace(/[\s-]+/g,"_");
+  return PREDICATES.has(s) ? s : "RELATED_TO";
+}
 
 function isCap(tok){ return /^[A-Z][A-Za-z.'&-]*$/.test(tok); }
 function isAcronym(tok){ return /^[A-Z]{2,}$/.test(tok); }
@@ -752,10 +787,14 @@ function bareWord(tok){ return tok.replace(/[.,;:!?()'"]+$/,"").replace(/^[.,;:!
 function classifySpan(nameTokens, personFlag){
   if (!nameTokens.length) return null;
   const lower = nameTokens.map(t => bareWord(t).toLowerCase());
-  if (lower.some(t => BIZ_WORDS.has(t))) return "Business";
+  const joined = lower.join(" ");
+  if (lower.some(t => BIZ_SUFFIX_WORDS.has(t))) return "Business";
+  if (lower.some(t => FACILITY_WORDS.has(t)))   return "Facility";
+  if (lower.some(t => ORG_WORDS.has(t)))        return "Organization";
+  if (LOCATIONS.has(joined))                    return "Location";
   if (nameTokens.length === 1 && isAcronym(bareWord(nameTokens[0]))) return "Business";
-  if (personFlag) return "Person";
-  if (nameTokens.length >= 2) return "Person";
+  if (personFlag) return "People";
+  if (nameTokens.length >= 2) return "People";
   return null;
 }
 
