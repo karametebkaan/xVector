@@ -935,6 +935,89 @@ function resolveIncremental(mentions, existingNodes){
   }
   return { nodeUpserts, membership };
 }
+// var (not const): the test harness reads core.EXTRACT_SCHEMA via the vm context
+// object, and top-level const/let do not attach to it — mirrors `var TYPES` above.
+var EXTRACT_SCHEMA = {
+  type:"object",
+  properties:{
+    entities:{ type:"array", items:{ type:"object", properties:{
+      name:{type:"string"},
+      label:{type:"string", enum:["People","Business","Organization","Facility","Location"]},
+      doc_ids:{type:"array", items:{type:"integer"}}
+    }, required:["name","label","doc_ids"] } },
+    relations:{ type:"array", items:{ type:"object", properties:{
+      subject:{type:"string"},
+      predicate:{type:"string", enum:["WORKS_AT","FOUNDED","LEADS","MEMBER_OF","LOCATED_IN","HEADQUARTERED_IN","PART_OF","OWNS","AFFILIATED_WITH","VISITED","RELATED_TO"]},
+      object:{type:"string"},
+      doc_ids:{type:"array", items:{type:"integer"}}
+    }, required:["subject","predicate","object","doc_ids"] } }
+  },
+  required:["entities","relations"]
+};
+function extractionPrompt(){
+  return "You are an entity and relation extractor. Read every document (each prefixed with its [n] id). "+
+    "Extract EVERY distinct named entity and label each as exactly one of: "+
+    "People (a human), Business (a for-profit company), Organization (government, agency, NGO, academic, or association), "+
+    "Facility (a built structure or venue: airport, stadium, hospital, museum, plant), or Location (a geographic place). "+
+    "Then extract relations between the entities using ONLY these predicates: "+
+    "WORKS_AT, FOUNDED, LEADS, MEMBER_OF, LOCATED_IN, HEADQUARTERED_IN, PART_OF, OWNS, AFFILIATED_WITH, VISITED, or RELATED_TO (fallback). "+
+    "For each entity and relation, list every doc id [n] it appears in. "+
+    "Return ONLY JSON of the form: "+
+    "{\"entities\":[{\"name\":\"...\",\"label\":\"People|Business|Organization|Facility|Location\",\"doc_ids\":[int]}],"+
+    "\"relations\":[{\"subject\":\"...\",\"predicate\":\"WORKS_AT|...\",\"object\":\"...\",\"doc_ids\":[int]}]}.";
+}
+function foldExtraction(obj, docs){
+  const valid = new Set(docs.map(d => d.id));
+  const recover = (surface, ids) => {
+    let out = (Array.isArray(ids) ? ids : []).filter(n => valid.has(n));
+    if (!out.length){
+      const needle = String(surface).toLowerCase();
+      out = docs.filter(d => d.text.toLowerCase().includes(needle)).map(d => d.id);
+    }
+    return out;
+  };
+  const mentions = [];
+  for (const e of (obj && obj.entities || [])){
+    const surface = String(e.name || "").trim();
+    if (!surface) continue;
+    const label = normLabel(e.label);
+    for (const id of recover(surface, e.doc_ids)) mentions.push({surface, label, docId:id});
+  }
+  const relations = [];
+  for (const r of (obj && obj.relations || [])){
+    const subject = String(r.subject || "").trim();
+    const object  = String(r.object  || "").trim();
+    if (!subject || !object) continue;
+    relations.push({subject, predicate:normPredicate(r.predicate), object, docIds:recover(subject, r.doc_ids)});
+  }
+  return {mentions, relations};
+}
+function buildRelationEdges(relations, entities){
+  const index = [];
+  for (const e of (entities||[])){
+    const forms = [e.name, ...((e.aliases)||[])];
+    for (const f of forms) index.push({norm:normalizeName(f), name:e.name, label:e.label});
+  }
+  const resolve = (surface) => {
+    const key = normalizeName(surface);
+    const hit = index.find(x => x.norm === key);
+    if (hit) return hit;
+    for (const e of (entities||[])) if (sameEntity(e.label, e.name, surface)) return {name:e.name, label:e.label};
+    return null;
+  };
+  const acc = new Map(); let dropped = 0;
+  for (const r of (relations||[])){
+    const s = resolve(r.subject), o = resolve(r.object);
+    if (!s || !o){ dropped++; continue; }
+    if (s.name === o.name){ dropped++; continue; }
+    const predicate = normPredicate(r.predicate);
+    const key = s.name+" "+o.name+" "+predicate;
+    if (acc.has(key)) continue;
+    acc.set(key, {node1:s.name, node2:o.name, label:predicate, edge_kind:"relation",
+      weight:1.0, sum_wv:1.0, sum_w:1.0, docIds:(r.docIds||[]).slice()});
+  }
+  return {edges:[...acc.values()], dropped};
+}
 /* CORE:END */
 
 /* CORE:BEGIN */

@@ -481,3 +481,65 @@ test("pickEmbeddings throws on count mismatch", () => {
 test("pickEmbeddings throws on unknown shape", () => {
   assert.throws(() => core.pickEmbeddings({nope:true}), /No embeddings array/);
 });
+
+test("foldExtraction folds labels/predicates and recovers doc_ids", () => {
+  const docs = [{id:1,text:"Kaan works at BabelStreet in Arlington."},{id:2,text:"BabelStreet is a company."}];
+  const obj = {
+    entities: [
+      {name:"Kaan", label:"person", doc_ids:[1]},
+      {name:"BabelStreet", label:"company", doc_ids:[]},        // recover by scan -> 1,2
+      {name:"", label:"People", doc_ids:[1]},                    // dropped (empty)
+    ],
+    relations: [
+      {subject:"Kaan", predicate:"works at", object:"BabelStreet", doc_ids:[1]},
+      {subject:"Kaan", predicate:"WORKS_AT", object:"", doc_ids:[1]},  // dropped (empty object)
+    ],
+  };
+  const r = core.foldExtraction(obj, docs);
+  assertNonStrict.deepEqual(r.mentions.filter(m=>m.surface==="Kaan"), [{surface:"Kaan",label:"People",docId:1}]);
+  const bs = r.mentions.filter(m=>m.surface==="BabelStreet").map(m=>m.docId).sort();
+  assertNonStrict.deepEqual(bs, [1,2]);
+  assert.equal(r.relations.length, 1);
+  assert.equal(r.relations[0].predicate, "WORKS_AT");
+});
+
+test("buildRelationEdges resolves endpoints, drops unresolved, no self-loops", () => {
+  const entities = [
+    {name:"Kaan Karamete", label:"People", aliases:["Kaan","Kaan Karamete"]},
+    {name:"BabelStreet", label:"Business", aliases:["BabelStreet"]},
+  ];
+  const relations = [
+    {subject:"Kaan", predicate:"WORKS_AT", object:"BabelStreet", docIds:[1]},
+    {subject:"Kaan", predicate:"LEADS", object:"Nowhere Corp", docIds:[1]},   // object unresolved -> dropped
+    {subject:"Kaan", predicate:"RELATED_TO", object:"Kaan Karamete", docIds:[1]}, // self -> dropped
+  ];
+  const r = core.buildRelationEdges(relations, entities);
+  assert.equal(r.edges.length, 1);
+  assert.equal(r.dropped, 2);
+  const e = r.edges[0];
+  assert.equal(e.node1, "Kaan Karamete");   // subject -> canonical
+  assert.equal(e.node2, "BabelStreet");     // object  -> canonical (direction preserved)
+  assert.equal(e.label, "WORKS_AT");
+  assert.equal(e.edge_kind, "relation");
+  assert.equal(e.weight, 1);
+  assert.equal(e.sum_wv, 1); assert.equal(e.sum_w, 1);
+});
+
+test("buildRelationEdges keeps one row per (pair, predicate)", () => {
+  const entities = [{name:"A",label:"Business",aliases:["A"]},{name:"B",label:"Business",aliases:["B"]}];
+  const rels = [
+    {subject:"A",predicate:"OWNS",object:"B",docIds:[1]},
+    {subject:"A",predicate:"OWNS",object:"B",docIds:[2]},   // dup pair+predicate -> collapsed
+    {subject:"A",predicate:"AFFILIATED_WITH",object:"B",docIds:[3]},
+  ];
+  const r = core.buildRelationEdges(rels, entities);
+  assert.equal(r.edges.length, 2);
+});
+
+test("EXTRACT_SCHEMA enumerates the five types and the predicate set", () => {
+  const ent = core.EXTRACT_SCHEMA.properties.entities.items.properties.label.enum;
+  assertNonStrict.deepEqual(ent, ["People","Business","Organization","Facility","Location"]);
+  const pred = core.EXTRACT_SCHEMA.properties.relations.items.properties.predicate.enum;
+  assert.ok(pred.includes("WORKS_AT") && pred.includes("RELATED_TO"));
+  assert.ok(typeof core.extractionPrompt() === "string" && core.extractionPrompt().length > 50);
+});
