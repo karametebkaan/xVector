@@ -280,7 +280,7 @@ class Handler(SimpleHTTPRequestHandler):
 def main():
     global ROUTES, GCP_PROJECT, GCP_REGION
     p = argparse.ArgumentParser(description="Serve xVector with Kinetica + Ollama proxies.")
-    p.add_argument("--port", type=int, default=8000)
+    p.add_argument("--port", type=int, default=8181)
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--kinetica", default=os.environ.get("KINETICA_URL", "http://localhost:9191"),
                    help="Kinetica instance URL")

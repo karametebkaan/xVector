@@ -19,12 +19,12 @@ samples/            paragraph fixtures for manual testing
 ## Running it
 
 ```bash
-python3 scripts/serve.py                                   # serves :8000, proxies to :9191
+python3 scripts/serve.py                                   # serves :8181, proxies to :9191
 python3 scripts/serve.py --port 8080 --kinetica http://kinetica-host:9191
 python3 scripts/serve.py --kinetica http://localhost:9191 --ollama http://localhost:11434
 ```
 
-Then open http://localhost:8000 and set **Instance URL** to `/kinetica`. That routes SQL
+Then open http://localhost:8181 and set **Instance URL** to `/kinetica`. That routes SQL
 through the proxy, which sidesteps both CORS and mixed-content blocking. Pointing the app
 straight at `http://localhost:9191` also works if you open `index.html` from disk and
 Kinetica is configured to allow the origin.

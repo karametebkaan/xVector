@@ -31,7 +31,7 @@ Paste paragraphs, get 64-dimension vectors, write them to Kinetica as
 python3 scripts/serve.py
 ```
 
-Open http://localhost:8000 and set **Instance URL** to `/kinetica`. The server proxies SQL
+Open http://localhost:8181 and set **Instance URL** to `/kinetica`. The server proxies SQL
 to `http://localhost:9191`, so the browser makes no cross-origin call. Point it elsewhere
 with `--kinetica http://host:9191`.
 
