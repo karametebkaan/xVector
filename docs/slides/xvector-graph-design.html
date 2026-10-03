@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>xVector — Paragraphs to a Scalable Knowledge Graph</title>
+<style>
+  :root{
+    --canvas:#EAE9F0;
+    --panel:#FDFCFF;
+    --ink:#16172B;
+    --muted:#6A6B85;
+    --line:#D3D2E2;
+    --signal:#4B2ED6;      /* People / positive dims  */
+    --signal-soft:#EDE9FD;
+    --warm:#C97A19;        /* Business / negative dims */
+    --warm-soft:#F6E9D6;
+    --good:#1F8A6D;
+    --bad:#C4304A;
+    --mono: ui-monospace, SFMono-Regular, Menlo, "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+    --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:
+      radial-gradient(1200px 600px at 82% -10%, #F3F1FA 0%, transparent 60%),
+      var(--canvas);
+    color:var(--ink);
+    font-family:var(--sans);
+    min-height:100vh;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:26px; padding:26px;
+  }
+
+  /* ---- 16:9 slide, scales to viewport ---- */
+  .slide{
+    width:min(96vw, calc(96vh * 16 / 9));
+    aspect-ratio:16 / 9;
+    background:var(--canvas);
+    border:1px solid var(--line);
+    box-shadow:0 24px 60px -30px rgba(22,23,43,.45);
+    display:grid;
+    grid-template-rows:auto auto 1fr auto;
+    padding:clamp(14px, 2.4cqw, 30px);
+    container-type:inline-size;
+    position:relative;
+    overflow:hidden;
+  }
+  /* everything scales off the slide width via cqw */
+  .slide{ font-size: clamp(9px, 1.05cqw, 15px); }
+
+  .eyebrow{
+    font-family:var(--mono);
+    font-size:.78em; letter-spacing:.24em; text-transform:uppercase;
+    color:var(--muted); font-weight:600;
+  }
+
+  /* ---------- HEADER ---------- */
+  header.head{
+    display:flex; align-items:flex-end; justify-content:space-between;
+    gap:1.4em;
+    padding-bottom:.9em; border-bottom:2px solid var(--ink);
+  }
+  .brand .mark{
+    font-family:var(--mono); font-weight:700;
+    font-size:1.05em; letter-spacing:.30em; color:var(--ink);
+  }
+  .brand .mark b{ color:var(--signal); font-weight:700; }
+  h1{
+    margin:.28em 0 0; font-weight:600;
+    font-size:2.15em; line-height:1.02; letter-spacing:-.012em;
+    max-width:20ch;
+  }
+  h1 .accent{ color:var(--signal); }
+  .target{ text-align:right; font-family:var(--mono); color:var(--muted); font-size:.82em; }
+  .target .k{ display:block; }
+  .target b{
+    display:block; color:var(--signal); font-weight:600;
+    font-size:1.15em; letter-spacing:.02em; margin-top:.2em;
+  }
+  .target .dim{ color:var(--muted); opacity:.85; }
+
+  /* ---------- PIPELINE SPINE ---------- */
+  .pipeline{
+    margin-top:1.05em;
+    display:grid;
+    grid-template-columns:repeat(6, 1fr);
+    gap:.55em;
+  }
+  .stage{
+    background:var(--panel); border:1px solid var(--line);
+    border-radius:3px; padding:.7em .72em .62em;
+    position:relative; overflow:hidden;
+  }
+  .stage::before{
+    content:""; position:absolute; left:0; top:0; bottom:0; width:3px;
+    background:var(--signal);
+  }
+  .stage.gb::before{ background:var(--warm); }
+  .stage .no{
+    font-family:var(--mono); font-size:.72em; letter-spacing:.14em;
+    color:var(--muted); font-weight:600;
+  }
+  .stage .nm{
+    font-family:var(--mono); font-weight:600; font-size:.98em;
+    margin:.12em 0 .18em; letter-spacing:.01em; color:var(--ink);
+  }
+  .stage .ds{ font-size:.78em; line-height:1.28; color:var(--muted); }
+  .stage .fn{ color:var(--signal); font-family:var(--mono); font-size:.92em; }
+  .stage.gb .fn{ color:var(--warm); }
+
+  /* the flow arrows between stages */
+  .stage:not(:last-child)::after{
+    content:"›"; position:absolute; right:-.62em; top:50%;
+    transform:translateY(-50%);
+    font-family:var(--mono); font-weight:700; font-size:1.2em;
+    color:var(--muted); z-index:2;
+  }
+
+  /* ---------- BODY GRID ---------- */
+  .body{
+    margin-top:1.05em;
+    display:grid;
+    grid-template-columns:1.34fr 1fr;
+    gap:.9em;
+    min-height:0;
+  }
+  .col{ display:grid; gap:.7em; min-height:0; }
+
+  .card{
+    background:var(--panel); border:1px solid var(--line); border-radius:3px;
+    padding:.85em .95em; min-height:0;
+  }
+  .card h2{
+    margin:0 0 .6em; font-family:var(--mono); font-weight:600;
+    font-size:.76em; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--muted);
+    display:flex; align-items:center; gap:.6em;
+  }
+  .card h2::after{ content:""; flex:1; height:1px; background:var(--line); }
+
+  /* ---------- SIGNATURE: one sentence → two kinds of edge ---------- */
+  .sig{ display:flex; flex-direction:column; }
+  .lanes{ flex:1; display:flex; flex-direction:column; justify-content:space-evenly; min-height:0; }
+
+  /* a layer = header + (source → method → resulting edge) */
+  .lanewrap{ display:grid; gap:.6em; min-height:0; }
+  .lanewrap + .lanewrap{ border-top:1px dashed var(--line); padding-top:1em; }
+  .lanehdr{ display:flex; align-items:baseline; gap:.55em; }
+  .lanehdr .num{
+    font-family:var(--mono); font-weight:700; color:#fff; font-size:.72em;
+    border-radius:2px; padding:.04em .45em;
+  }
+  .lanehdr .num.rel{ background:var(--ink); }
+  .lanehdr .num.emb{ background:linear-gradient(90deg,var(--signal),var(--warm)); }
+  .lanehdr .h{
+    font-family:var(--mono); font-size:.74em; letter-spacing:.14em;
+    text-transform:uppercase; font-weight:600; color:var(--ink);
+  }
+  .lanehdr .sub{ font-size:.74em; color:var(--muted); }
+
+  .lane{
+    display:grid; grid-template-columns:1.15fr auto 1.6fr;
+    align-items:center; gap:.8em; min-height:0;
+  }
+
+  .strip{
+    display:grid; grid-auto-flow:column; grid-auto-columns:1fr;
+    height:.46em; margin-top:.34em; border:1px solid var(--line);
+    border-radius:2px; overflow:hidden; gap:1px; background:var(--line);
+  }
+  .strip i{ display:block; }
+
+  /* source: a document with its sentence */
+  .srcdoc{
+    display:grid; grid-template-columns:auto 1fr; gap:.55em; align-items:center;
+    background:#fff; border:1px solid var(--line); border-radius:3px; padding:.5em .55em;
+  }
+  .meta{ text-align:center; }
+  .did{
+    font-family:var(--mono); font-size:.68em; font-weight:700; letter-spacing:.06em;
+    color:var(--muted); display:block;
+  }
+  .tag{
+    font-family:var(--mono); font-size:.56em; letter-spacing:.08em; text-transform:uppercase;
+    border-radius:2px; padding:.05em .35em; margin-top:.22em; display:inline-block;
+  }
+  .tag.new{ background:var(--signal); color:#fff; }
+  .tag.old{ background:#EDEDF3; color:var(--muted); }
+  .dtext{ font-size:.82em; line-height:1.25; color:var(--ink); }
+  .dtext b.p{ color:var(--signal); font-weight:600; }
+  .dtext b.b{ color:var(--warm); font-weight:600; }
+
+  /* source: two docs found similar by kNN */
+  .srcsim{
+    background:#fff; border:1px solid var(--line); border-radius:3px;
+    padding:.45em .55em; display:grid; gap:.32em;
+  }
+  .srcsim .dl{ display:grid; grid-template-columns:auto 1fr; gap:.5em; align-items:center; }
+  .srcsim .cosline{
+    text-align:center; font-family:var(--mono); font-size:.7em; color:var(--muted);
+    border-top:1px dashed var(--line); padding-top:.28em; margin-top:.05em;
+  }
+  .srcsim .cosline b{ color:var(--ink); font-weight:700; }
+
+  /* method arrow between source and edge */
+  .via{
+    text-align:center; font-family:var(--mono); color:var(--muted);
+    font-size:.66em; line-height:1.3; letter-spacing:.04em;
+  }
+  .via .ar{ display:block; font-size:1.7em; color:var(--ink); line-height:.8; }
+  .via b{ color:var(--ink); font-weight:600; }
+
+  /* resulting mini edge: node — chip — node */
+  .miniedge{ display:grid; grid-template-columns:1fr 1.25fr 1fr; align-items:center; }
+  .enode{
+    background:#fff; border:1px solid var(--line); border-radius:3px;
+    padding:.5em .45em; text-align:center;
+  }
+  .enode.person{ box-shadow:inset 0 3px 0 var(--signal); }
+  .enode.biz{ box-shadow:inset 0 3px 0 var(--warm); }
+  .enode .name{ font-family:var(--mono); font-weight:600; font-size:.86em; }
+  .enode .type{
+    font-family:var(--mono); font-size:.62em; letter-spacing:.12em;
+    text-transform:uppercase; margin-top:.08em;
+  }
+  .enode .type.p{ color:var(--signal); }
+  .enode .type.b{ color:var(--warm); }
+
+  .edge{ position:relative; height:100%; display:flex; align-items:center; }
+  .edge .line{ width:100%; }
+  .edge .line.works{ border-top:2.5px solid var(--ink); }
+  .edge .line.emb{
+    border-top:2.5px dashed transparent;
+    border-image:linear-gradient(90deg,var(--signal),var(--warm)) 1;
+  }
+  .edge .chip{
+    position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    font-family:var(--mono); font-size:.66em; font-weight:700; letter-spacing:.04em;
+    border-radius:2px; padding:.16em .5em; white-space:nowrap; text-align:center; color:#fff;
+  }
+  .edge .chip.works{ background:var(--ink); }
+  .edge .chip.emb{ background:linear-gradient(90deg,var(--signal),var(--warm)); }
+  .edge .chip small{ font-weight:400; opacity:.9; display:block; font-size:.86em; letter-spacing:.06em; }
+
+  /* IDW formula card (right column) */
+  .formula{
+    font-family:var(--mono); font-size:.82em; line-height:1.62; color:var(--ink);
+  }
+  .formula sub{ font-size:.72em; }
+  .formula .c{ color:var(--muted); }
+  .formula .hl{ color:var(--signal); font-weight:600; }
+  .formula .note{
+    display:block; margin-top:.5em; padding-top:.5em; border-top:1px solid var(--line);
+    font-size:.9em; color:var(--muted); line-height:1.35;
+  }
+  .formula .note b{ color:var(--ink); }
+
+  /* ---------- RIGHT COLUMN CARDS ---------- */
+  .two-layer .row{
+    display:grid; grid-template-columns:auto 1fr auto; gap:.6em;
+    align-items:center; padding:.4em 0;
+  }
+  .two-layer .row + .row{ border-top:1px solid var(--line); }
+  .swatch{
+    width:1.5em; height:1.5em; border-radius:2px; flex:none;
+    display:grid; place-items:center; font-family:var(--mono);
+    font-size:.7em; font-weight:700; color:#fff;
+  }
+  .swatch.rel{ background:var(--ink); }
+  .swatch.emb{ background:linear-gradient(90deg,var(--signal),var(--warm)); }
+  .two-layer .rt{ display:block; }
+  .two-layer .rt .t{ display:block; font-family:var(--mono); font-weight:600; font-size:.9em; }
+  .two-layer .rt .d{ display:block; font-size:.76em; color:var(--muted); line-height:1.25; margin-top:.12em; }
+  .two-layer .wv{
+    font-family:var(--mono); font-size:.78em; color:var(--muted); text-align:right; white-space:nowrap;
+  }
+  .two-layer .wv b{ color:var(--ink); }
+
+  .onto{ display:flex; flex-wrap:wrap; gap:.4em; }
+  .chip{
+    font-family:var(--mono); font-size:.78em; font-weight:600;
+    border:1px solid var(--line); border-radius:2px;
+    padding:.28em .6em; background:#fff; color:var(--ink);
+    display:inline-flex; align-items:center; gap:.45em;
+  }
+  .chip .dot{ width:.6em; height:.6em; border-radius:50%; }
+  .chip.p .dot{ background:var(--signal); }
+  .chip.b .dot{ background:var(--warm); }
+  .onto-note{ font-size:.76em; color:var(--muted); margin:.55em 0 0; line-height:1.3; }
+
+  .scale-txt{ font-size:.82em; line-height:1.42; color:var(--ink); margin:0; }
+  .scale-txt b{ color:var(--signal); }
+  .scale-txt .old{ color:var(--muted); text-decoration:line-through; }
+  .scale-eq{
+    font-family:var(--mono); font-size:.82em; margin-top:.5em;
+    display:flex; gap:.6em; align-items:center; color:var(--muted);
+  }
+  .scale-eq .big{ color:var(--good); font-weight:700; }
+  .scale-eq .bad{ color:var(--bad); font-weight:600; text-decoration:line-through; }
+
+  /* ---------- FOOTER ---------- */
+  footer.foot{
+    margin-top:.95em; padding-top:.7em; border-top:2px solid var(--ink);
+    display:flex; align-items:center; justify-content:space-between; gap:1em;
+    font-family:var(--mono); font-size:.78em; color:var(--muted);
+  }
+  footer.foot .tbls b{ color:var(--ink); font-weight:600; }
+  footer.foot .tbls .t{
+    color:var(--signal); background:var(--signal-soft);
+    border-radius:2px; padding:.05em .4em; margin:0 .12em;
+  }
+  footer.foot .cta{ color:var(--ink); }
+  footer.foot .cta code{
+    background:#F1F0F8; padding:.1em .4em; border-radius:2px; color:var(--ink);
+  }
+
+  @media print{
+    @page{ size:landscape; margin:0; }
+    body{ background:#fff; padding:0; gap:0; display:block; }
+    .slide{ width:100vw; height:100vh; aspect-ratio:auto; box-shadow:none; border:none; break-after:page; }
+    .slide:last-of-type{ break-after:auto; }
+  }
+
+  /* ================= SLIDE 2 · scalability ================= */
+  .def{ font-size:.86em; line-height:1.5; color:var(--ink); margin:0 0 .7em; }
+  .def b{ color:var(--signal); font-weight:600; }
+  .def .exp{ font-family:var(--mono); color:var(--warm); font-weight:600; }
+
+  .hnswcard{ display:flex; flex-direction:column; }
+  .hnswfig{ flex:1; width:100%; min-height:0; margin-top:.2em; }
+  .hnswfig svg{ width:100%; height:100%; }
+  .hnswfig .lbl{ font-family:var(--mono); font-size:9px; fill:var(--muted); letter-spacing:.06em; }
+  .hnswfig .cap{ font-family:var(--mono); font-size:8.5px; }
+
+  .leg{ display:flex; gap:1.1em; flex-wrap:wrap; margin-top:.4em;
+    font-family:var(--mono); font-size:.72em; color:var(--muted); }
+  .leg span{ display:inline-flex; align-items:center; gap:.4em; }
+  .leg i{ width:.9em; height:.9em; border-radius:50%; display:inline-block; }
+  .leg i.q{ background:var(--signal); }
+  .leg i.k{ background:var(--warm); }
+  .leg i.o{ background:#C7C6DA; }
+  .leg i.w{ width:1.5em; height:0; border-radius:0; border-top:2.4px solid var(--signal); background:none; }
+
+  /* TOP-k result */
+  .knnbody{ display:grid; grid-template-columns:1fr auto; gap:1em; align-items:start; }
+  .corpus{ display:grid; grid-template-columns:repeat(18,1fr); gap:2px; }
+  .corpus i{ aspect-ratio:1; background:#DEDDE9; border-radius:1px; display:block; }
+  .corpus i.hit{ background:var(--warm); }
+  .corpuscap{ font-family:var(--mono); font-size:.7em; color:var(--muted); margin-top:.45em; line-height:1.3; }
+  .corpuscap b{ color:var(--warm); }
+
+  .nbr{ font-family:var(--mono); font-size:.76em; min-width:9.5em; }
+  .nbr .hd{ color:var(--muted); font-size:.9em; letter-spacing:.06em;
+    display:grid; grid-template-columns:1.2em 1fr auto; gap:.5em; padding-bottom:.25em;
+    border-bottom:1px solid var(--line); margin-bottom:.2em; }
+  .nbr .r{ display:grid; grid-template-columns:1.2em 1fr auto; gap:.5em; padding:.14em 0; }
+  .nbr .r .rk{ color:var(--warm); font-weight:700; }
+  .nbr .r .sim{ font-weight:600; color:var(--good); }
+  .nbr .beta{ margin-top:.4em; padding-top:.35em; border-top:1px dashed var(--line);
+    color:var(--muted); font-size:.9em; }
+
+  .sql{
+    font-family:var(--mono); font-size:.74em; line-height:1.55; white-space:pre-wrap;
+    background:#F1F0F8; border:1px solid var(--line); border-radius:2px;
+    padding:.7em .8em; color:var(--ink); margin:0;
+  }
+  .sql .kw{ color:var(--signal); font-weight:600; }
+  .sql .c{ color:var(--muted); }
+  .sql .lit{ color:var(--warm); }
+
+  .cost{ display:grid; gap:.55em; margin-top:.9em; }
+  .costrow{ display:grid; grid-template-columns:8.5em 1fr; gap:.7em; align-items:center;
+    font-family:var(--mono); font-size:.76em; }
+  .costrow .lab{ color:var(--muted); }
+  .costrow .lab b{ display:block; color:var(--ink); }
+  .track{ background:#EDEDF3; border-radius:2px; height:1.15em; position:relative; overflow:hidden; }
+  .track .fill{ position:absolute; left:0; top:0; bottom:0; border-radius:2px;
+    display:flex; align-items:center; padding:0 .5em; color:#fff;
+    font-family:var(--mono); font-size:.82em; white-space:nowrap; }
+  .track .fill.full{ width:100%; background:var(--bad); }
+  .track .fill.fast{ width:9%; min-width:2.4em; background:var(--good); }
+  .track .out{ position:absolute; right:.5em; top:50%; transform:translateY(-50%);
+    font-family:var(--mono); font-size:.82em; color:var(--good); }
+
+  /* ================= SLIDE 3 · vector-space intuition ================= */
+  .planefig{ flex:1; width:100%; min-height:0; margin:.3em 0; }
+  .planefig svg{ width:100%; height:100%; }
+  .planefig .qlbl{ font-family:var(--mono); font-size:10px; font-weight:700; fill:var(--signal); }
+  .planefig .pnote{ font-family:var(--mono); font-size:8.5px; fill:var(--muted); }
+
+  .steps{ margin:.15em 0 0; padding-left:1.25em; font-size:.85em; line-height:1.5; color:var(--ink); }
+  .steps li{ margin:.4em 0; }
+  .steps li::marker{ color:var(--muted); font-family:var(--mono); font-size:.85em; }
+  .steps b{ color:var(--signal); font-weight:600; }
+  .steps .b{ color:var(--warm); font-weight:600; }
+  .steps .aside{ color:var(--muted); }
+</style>
+</head>
+<body>
+<main class="slide" role="img"
+      aria-label="xVector design: paragraphs are split, embedded to 64-dimension vectors, mined for five entity types, related by kNN and inverse-distance-weighted similarity, and written to Kinetica as a knowledge graph.">
+
+  <!-- HEADER -->
+  <header class="head">
+    <div class="brand">
+      <div class="mark">x<b>VECTOR</b></div>
+      <h1>Paragraphs into a <span class="accent">scalable</span> knowledge graph</h1>
+    </div>
+    <div class="target">
+      <span class="k">DESIGN · ROADMAP</span>
+      <b>5 entity types · 2 edge layers</b>
+      <span class="dim">local-first · Kinetica · 64-d vectors</span>
+    </div>
+  </header>
+
+  <!-- PIPELINE SPINE -->
+  <section class="pipeline" aria-label="Pipeline stages">
+    <div class="stage">
+      <div class="no">01</div>
+      <div class="nm">Split</div>
+      <div class="ds">Paste → documents<br><span class="fn">splitText()</span></div>
+    </div>
+    <div class="stage">
+      <div class="no">02</div>
+      <div class="nm">Embed</div>
+      <div class="ds">64-d vector / doc<br><span class="fn">embedOllama()</span></div>
+    </div>
+    <div class="stage">
+      <div class="no">03</div>
+      <div class="nm">Extract</div>
+      <div class="ds">5-type NER + relations<br><span class="fn">extractLLM()</span></div>
+    </div>
+    <div class="stage">
+      <div class="no">04</div>
+      <div class="nm">kNN</div>
+      <div class="ds">Search from new docs<br><span class="fn">knnQuery()</span></div>
+    </div>
+    <div class="stage gb">
+      <div class="no">05</div>
+      <div class="nm">Graph</div>
+      <div class="ds">IDW weights, θ gate<br><span class="fn">computeEdges()</span></div>
+    </div>
+    <div class="stage gb">
+      <div class="no">06</div>
+      <div class="nm">Send</div>
+      <div class="ds">Nodes · edges · graph<br><span class="fn">graphScript()</span></div>
+    </div>
+  </section>
+
+  <!-- BODY -->
+  <div class="body">
+
+    <!-- LEFT: signature diagram -->
+    <div class="col">
+      <div class="card sig">
+        <h2>One sentence → two kinds of edge</h2>
+
+        <div class="lanes">
+        <!-- LANE 1 · relation edge from the stated sentence -->
+        <div class="lanewrap">
+        <div class="lanehdr"><span class="num rel">1</span><span class="h">Relation</span><span class="sub">stated in text · asserted</span></div>
+        <div class="lane">
+          <div class="srcdoc">
+            <div class="meta"><span class="did">DOC 12</span><span class="tag new">new</span></div>
+            <div>
+              <div class="dtext"><b class="p">John Doe</b> works for <b class="b">Company ABC</b>.</div>
+              <div class="strip" data-strip="A"></div>
+            </div>
+          </div>
+
+          <div class="via"><span class="ar">→</span>LLM<br><b>relation</b></div>
+
+          <div class="miniedge">
+            <div class="enode biz"><div class="name">Company ABC</div><div class="type b">Business</div></div>
+            <div class="edge"><div class="line works"></div><div class="chip works">WORKS<small>weight 1.0</small></div></div>
+            <div class="enode person"><div class="name">John Doe</div><div class="type p">People</div></div>
+          </div>
+        </div>
+        </div>
+
+        <!-- LANE 2 · similarity edge from kNN document neighbors -->
+        <div class="lanewrap">
+        <div class="lanehdr"><span class="num emb">2</span><span class="h">Embedded</span><span class="sub">inferred by document similarity</span></div>
+        <div class="lane">
+          <div class="srcsim">
+            <div class="dl">
+              <span class="meta"><span class="did">DOC 12</span></span>
+              <span class="strip" data-strip="B"></span>
+            </div>
+            <div class="dl">
+              <span class="meta"><span class="did">DOC 5</span><span class="tag old">indexed</span></span>
+              <span class="strip" data-strip="C"></span>
+            </div>
+            <div class="cosline">cos(v<sub>12</sub>, v<sub>5</sub>) ≈ <b>0.62</b> · kNN neighbor</div>
+          </div>
+
+          <div class="via"><span class="ar">→</span>kNN<br><b>+ IDW</b></div>
+
+          <div class="miniedge">
+            <div class="enode person"><div class="name">John Doe</div><div class="type p">People</div></div>
+            <div class="edge"><div class="line emb"></div><div class="chip emb">EMBEDDED<small>weight 0.81</small></div></div>
+            <div class="enode biz"><div class="name">Company ZZZ</div><div class="type b">Business</div></div>
+          </div>
+        </div>
+        </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: three concept cards -->
+    <div class="col">
+
+      <div class="card">
+        <h2>EMBEDDED edge weight · True-IDW</h2>
+        <div class="formula">
+          <span class="c">// over shared doc pairs a ∈ A, b ∈ B</span><br>
+          cos = v<sub>a</sub> · v<sub>b</sub> &nbsp;&nbsp;<span class="c">d = 1 − cos</span><br>
+          w = 1 / (ε + d) &nbsp;&nbsp; v = (1 + cos) / 2<br>
+          <span class="hl">weight = Σ(w · v) / Σ(w)</span> &nbsp;<span class="c">∈ (0, 1]</span>
+          <span class="note">Relation edges (<b>WORKS</b>, FOUNDED, LOCATED&#8209;IN) skip this — asserted, so <b>weight = 1.0</b>. Both layers gate at <b>θ = 0.5</b>.</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Five-type ontology</h2>
+        <div class="onto">
+          <span class="chip p"><span class="dot"></span>People</span>
+          <span class="chip b"><span class="dot"></span>Organization</span>
+          <span class="chip b"><span class="dot"></span>Business</span>
+          <span class="chip b"><span class="dot"></span>Facility</span>
+          <span class="chip b"><span class="dot"></span>Location</span>
+        </div>
+        <p class="onto-note">Block-key merge folds surface variants into stable canonical nodes; new variants become aliases, the PK never renames.</p>
+      </div>
+
+      <div class="card">
+        <h2>Why it scales</h2>
+        <p class="scale-txt">Each <b>new</b> document runs one TOP-k kNN over the HNSW-indexed table. Old↔old pairs are never revisited — their IDW lives in running Σ(w·v) and Σ(w) accumulators.</p>
+        <div class="scale-eq">
+          <span class="bad">O(all²)</span>
+          <span>→</span>
+          <span class="big">O(new · k)</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <footer class="foot">
+    <div class="tbls">
+      <b>Kinetica output:</b>
+      <span class="t">graph_nodes</span><span class="t">graph_edges</span><span class="t">graph_membership</span>
+      → CREATE UNDIRECTED GRAPH, cost = (1 − weight)
+    </div>
+    <div class="cta">Append mode: <code>doc_id = MAX+1</code></div>
+  </footer>
+
+</main>
+
+
+<!-- ===================== SLIDE 2 · SCALABILITY ===================== -->
+<main class="slide" role="img"
+      aria-label="Scalability: each new document runs one TOP-k nearest-neighbor query against an HNSW index, touching only a handful of the indexed vectors instead of scanning the whole table.">
+
+  <header class="head">
+    <div class="brand">
+      <div class="mark">x<b>VECTOR</b></div>
+      <h1>Search only from <span class="accent">new</span> documents</h1>
+    </div>
+    <div class="target">
+      <span class="k">STAGE 04 · kNN</span>
+      <b>≈ O(new · log N)</b>
+      <span class="dim">HNSW index · append-friendly</span>
+    </div>
+  </header>
+
+  <div class="body" style="grid-template-columns:1fr 1.08fr; margin-top:1.15em">
+
+    <!-- LEFT · what HNSW is, drawn -->
+    <div class="col">
+      <div class="card hnswcard">
+        <h2>What is HNSW</h2>
+        <p class="def"><b>Hierarchical Navigable Small World</b> — an approximate nearest-neighbor
+          index built as a stack of proximity graphs. The top layer is sparse with long-range links
+          for big jumps; each layer down is denser; the base holds every vector. A query greedily
+          hops toward its neighbors, descending layer by layer, so a lookup costs
+          <span class="exp">~O(log N)</span> — not a full O(N) scan. It updates automatically as rows
+          are inserted, which is why it is the default for an append-target table.</p>
+
+        <div class="hnswfig">
+          <svg viewBox="0 0 340 176" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+            <defs>
+              <marker id="ah" markerWidth="7" markerHeight="7" refX="5.5" refY="3" orient="auto">
+                <path d="M0,0 L6,3 L0,6 Z" fill="#4B2ED6"/>
+              </marker>
+            </defs>
+
+            <!-- layer guide lines + labels -->
+            <line x1="26" y1="30" x2="332" y2="30" stroke="#E7E6F0"/>
+            <line x1="26" y1="92" x2="332" y2="92" stroke="#E7E6F0"/>
+            <line x1="26" y1="154" x2="332" y2="154" stroke="#E7E6F0"/>
+            <text class="lbl" x="6" y="27">L2</text>
+            <text class="lbl" x="6" y="89">L1</text>
+            <text class="lbl" x="6" y="151">L0</text>
+            <text class="cap" x="300" y="20" text-anchor="end" fill="#6A6B85">sparse · long hops</text>
+            <text class="cap" x="300" y="171" text-anchor="end" fill="#6A6B85">dense · every vector</text>
+
+            <!-- base links -->
+            <g stroke="#D3D2E2" stroke-width="1" fill="none">
+              <line x1="70" y1="30" x2="170" y2="30"/><line x1="170" y1="30" x2="270" y2="30"/>
+              <line x1="40" y1="92" x2="105" y2="92"/><line x1="105" y1="92" x2="170" y2="92"/>
+              <line x1="170" y1="92" x2="235" y2="92"/><line x1="235" y1="92" x2="300" y2="92"/>
+              <line x1="30" y1="154" x2="64" y2="154"/><line x1="64" y1="154" x2="98" y2="154"/>
+              <line x1="98" y1="154" x2="132" y2="154"/><line x1="132" y1="154" x2="166" y2="154"/>
+              <line x1="166" y1="154" x2="200" y2="154"/><line x1="200" y1="154" x2="234" y2="154"/>
+              <line x1="234" y1="154" x2="268" y2="154"/><line x1="268" y1="154" x2="302" y2="154"/>
+              <!-- inter-layer -->
+              <line x1="70" y1="30" x2="40" y2="92"/><line x1="170" y1="30" x2="170" y2="92"/>
+              <line x1="270" y1="30" x2="300" y2="92"/>
+              <line x1="40" y1="92" x2="30" y2="154"/><line x1="105" y1="92" x2="98" y2="154"/>
+              <line x1="170" y1="92" x2="166" y2="154"/><line x1="235" y1="92" x2="234" y2="154"/>
+              <line x1="300" y1="92" x2="302" y2="154"/>
+            </g>
+
+            <!-- greedy query descent -->
+            <g stroke="#4B2ED6" stroke-width="2.4" fill="none" marker-end="url(#ah)">
+              <line x1="20" y1="14" x2="66" y2="29"/>
+              <line x1="70" y1="30" x2="166" y2="30"/>
+              <line x1="170" y1="30" x2="170" y2="88"/>
+              <line x1="170" y1="92" x2="231" y2="92"/>
+              <line x1="235" y1="92" x2="234" y2="150"/>
+            </g>
+
+            <!-- unvisited nodes -->
+            <g fill="#C7C6DA" stroke="#fff" stroke-width="1.5">
+              <circle cx="270" cy="30" r="4"/>
+              <circle cx="40" cy="92" r="4"/><circle cx="105" cy="92" r="4"/><circle cx="300" cy="92" r="4"/>
+              <circle cx="30" cy="154" r="4"/><circle cx="64" cy="154" r="4"/><circle cx="98" cy="154" r="4"/>
+              <circle cx="132" cy="154" r="4"/>
+            </g>
+            <!-- visited path nodes -->
+            <g fill="#EDE9FD" stroke="#4B2ED6" stroke-width="1.8">
+              <circle cx="70" cy="30" r="4.5"/><circle cx="170" cy="30" r="4.5"/>
+              <circle cx="170" cy="92" r="4.5"/><circle cx="235" cy="92" r="4.5"/>
+            </g>
+            <!-- top-k neighbors (result) -->
+            <g fill="#C97A19" stroke="#fff" stroke-width="1.5">
+              <circle cx="166" cy="154" r="5"/><circle cx="200" cy="154" r="5"/>
+              <circle cx="234" cy="154" r="5.5"/><circle cx="268" cy="154" r="5"/>
+              <circle cx="302" cy="154" r="5"/>
+            </g>
+            <!-- query entry -->
+            <circle cx="20" cy="14" r="5" fill="#4B2ED6"/>
+            <text class="cap" x="30" y="12" fill="#4B2ED6" font-weight="700">new doc query</text>
+          </svg>
+        </div>
+
+        <div class="leg">
+          <span><i class="q"></i> query descent</span>
+          <span><i class="k"></i> TOP-k result</span>
+          <span><i class="o"></i> untouched vectors</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT · the TOP-k example + cost -->
+    <div class="col">
+
+      <div class="card">
+        <h2>TOP-k kNN · one query per new doc <span style="color:var(--muted);font-weight:400">(k = 5, made up)</span></h2>
+        <div class="knnbody">
+          <div>
+            <div class="corpus" id="corpus" aria-hidden="true"></div>
+            <div class="corpuscap">126 of <b>~10,000</b> indexed vectors shown · HNSW returns the
+              <b>5 nearest</b> · the rest are never compared.</div>
+          </div>
+          <div class="nbr">
+            <div class="hd"><span>#</span><span>doc</span><span>sim</span></div>
+            <div class="r"><span class="rk">1</span><span>D-0512</span><span class="sim">0.62</span></div>
+            <div class="r"><span class="rk">2</span><span>D-0088</span><span class="sim">0.55</span></div>
+            <div class="r"><span class="rk">3</span><span>D-0041</span><span class="sim">0.48</span></div>
+            <div class="r"><span class="rk">4</span><span>D-0007</span><span class="sim">0.44</span></div>
+            <div class="r"><span class="rk">5</span><span>D-0973</span><span class="sim">0.41</span></div>
+            <div class="beta">cutoff β: distance ≤ 0.60</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>The query &amp; why it stays cheap</h2>
+        <pre class="sql"><span class="c">-- per new doc: bounded by the index, not the table size</span>
+<span class="kw">SELECT TOP</span> 5 doc_id,
+       1 - COSINE_DISTANCE(embedding, :q) <span class="kw">AS</span> sim
+<span class="kw">FROM</span>   vector_embeddings
+<span class="kw">WHERE</span>  COSINE_DISTANCE(embedding, :q) &lt;= <span class="lit">0.60</span>
+<span class="kw">ORDER BY</span> COSINE_DISTANCE(embedding, :q);</pre>
+
+        <div class="cost">
+          <div class="costrow">
+            <span class="lab">Full scan<b>O(N) per doc</b></span>
+            <div class="track"><div class="fill full">~10,000 comparisons</div></div>
+          </div>
+          <div class="costrow">
+            <span class="lab">HNSW kNN<b>~O(log N) per doc</b></span>
+            <div class="track"><div class="fill fast"></div><span class="out">~ a few dozen hops → 5 kept</span></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <footer class="foot">
+    <div class="tbls"><b>Only new docs are query origins.</b> Old↔old pairs already live in the
+      <span class="t">graph_edges</span> accumulators — total cost <b style="color:var(--ink)">O(new · log N)</b>, never O(N²).</div>
+    <div class="cta">k, β · tunable · <code>ADD HNSW INDEX</code></div>
+  </footer>
+
+</main>
+
+<!-- ============================ SLIDE 3 ============================ -->
+<main class="slide" role="img"
+      aria-label="Intuition for kNN in vector space: each document is a point on a plane, each point carries a ring covering its nearest neighbors, and a new document drops in and lands inside the rings of the existing points that become its neighbors.">
+
+  <header class="head">
+    <div class="brand">
+      <div class="mark">x<b>VECTOR</b></div>
+      <h1>Documents are <span class="accent">points</span>, neighbors are reach</h1>
+    </div>
+    <div class="target">
+      <span class="k">INTUITION · vector space</span>
+      <b>k-NN = who's in my ring</b>
+      <span class="dim">each dot = one document</span>
+    </div>
+  </header>
+
+  <div class="body" style="grid-template-columns:1.34fr 1fr; margin-top:1.15em">
+
+    <!-- LEFT · the 2D scatter -->
+    <div class="col">
+      <div class="card">
+        <h2>The embedding space, flattened to a plane</h2>
+        <div class="planefig">
+          <svg viewBox="0 0 400 255" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+            <defs>
+              <marker id="wah" markerWidth="8" markerHeight="8" refX="5.5" refY="3" orient="auto">
+                <path d="M0,0 L6,3 L0,6 Z" fill="#4B2ED6"/>
+              </marker>
+            </defs>
+
+            <!-- NN rings around ordinary documents (a few drawn; every dot has one) -->
+            <g fill="rgba(75,46,214,0.045)" stroke="rgba(75,46,214,0.24)" stroke-width="1" stroke-dasharray="4 4">
+              <circle cx="100" cy="120" r="48"/>
+              <circle cx="250" cy="150" r="46"/>
+              <circle cx="345" cy="135" r="46"/>
+              <circle cx="88"  cy="170" r="40"/>
+            </g>
+            <!-- rings the new point LANDS INSIDE -->
+            <g fill="rgba(201,122,25,0.11)" stroke="#C97A19" stroke-width="1.6">
+              <circle cx="200" cy="140" r="58"/>
+              <circle cx="185" cy="110" r="50"/>
+            </g>
+
+            <!-- neighbor links = the stored proximity graph (HNSW base layer) -->
+            <g stroke="#D3D2E2" stroke-width="1" fill="none">
+              <line x1="70" y1="95"  x2="100" y2="120"/><line x1="100" y1="120" x2="120" y2="100"/>
+              <line x1="100" y1="120" x2="60"  y2="150"/><line x1="60"  y1="150" x2="88"  y2="170"/>
+              <line x1="200" y1="140" x2="230" y2="120"/><line x1="200" y1="140" x2="185" y2="110"/>
+              <line x1="200" y1="140" x2="215" y2="180"/><line x1="230" y1="120" x2="250" y2="150"/>
+              <line x1="250" y1="150" x2="265" y2="175"/>
+              <line x1="320" y1="95"  x2="345" y2="135"/><line x1="345" y1="135" x2="352" y2="100"/>
+              <line x1="320" y1="95"  x2="300" y2="115"/><line x1="310" y1="155" x2="345" y2="135"/>
+              <line x1="310" y1="155" x2="250" y2="150"/>  <!-- bridge C→B, carries the walk -->
+            </g>
+
+            <!-- greedy navigable walk: start at the far-right entry, hop neighbor→neighbor,
+                 each step closer, until the path arrives on the disk that contains Q -->
+            <g stroke="#4B2ED6" stroke-width="2.6" fill="none" stroke-linecap="round" marker-end="url(#wah)">
+              <line x1="352" y1="100" x2="346" y2="132"/>
+              <line x1="345" y1="135" x2="313" y2="153"/>
+              <line x1="310" y1="155" x2="253" y2="150"/>
+              <line x1="250" y1="150" x2="233" y2="123"/>
+              <line x1="230" y1="120" x2="203" y2="138"/>
+            </g>
+
+            <!-- the new document's connections to the neighbors it landed on -->
+            <g stroke="#C97A19" stroke-width="2" stroke-dasharray="3 3" fill="none">
+              <line x1="172" y1="150" x2="200" y2="140"/>
+              <line x1="172" y1="150" x2="185" y2="110"/>
+            </g>
+
+            <!-- ordinary document points -->
+            <g fill="#8583B6" stroke="#fff" stroke-width="1.2">
+              <circle cx="70"  cy="95"  r="3.6"/><circle cx="100" cy="120" r="3.6"/>
+              <circle cx="60"  cy="150" r="3.6"/><circle cx="120" cy="100" r="3.6"/>
+              <circle cx="88"  cy="170" r="3.6"/><circle cx="250" cy="150" r="3.6"/>
+              <circle cx="230" cy="120" r="3.6"/><circle cx="215" cy="180" r="3.6"/>
+              <circle cx="265" cy="175" r="3.6"/><circle cx="320" cy="95"  r="3.6"/>
+              <circle cx="345" cy="135" r="3.6"/><circle cx="310" cy="155" r="3.6"/>
+              <circle cx="352" cy="100" r="3.6"/><circle cx="300" cy="115" r="3.6"/>
+              <circle cx="150" cy="222" r="3.6"/><circle cx="285" cy="220" r="3.6"/>
+              <circle cx="120" cy="205" r="3.6"/><circle cx="335" cy="210" r="3.6"/>
+            </g>
+            <!-- nodes touched by the greedy walk -->
+            <g fill="none" stroke="#4B2ED6" stroke-width="1.6">
+              <circle cx="345" cy="135" r="5.6"/><circle cx="310" cy="155" r="5.6"/>
+              <circle cx="250" cy="150" r="5.6"/><circle cx="230" cy="120" r="5.6"/>
+            </g>
+            <!-- entry point of the search -->
+            <circle cx="352" cy="100" r="6.4" fill="none" stroke="#4B2ED6" stroke-width="2"/>
+            <circle cx="352" cy="100" r="3" fill="#4B2ED6"/>
+            <text class="qlbl" x="366" y="97" text-anchor="start">entry</text>
+
+            <!-- neighbors the new point landed on -->
+            <g fill="#C97A19" stroke="#fff" stroke-width="1.4">
+              <circle cx="200" cy="140" r="4.8"/><circle cx="185" cy="110" r="4.8"/>
+            </g>
+
+            <!-- the incoming document (diamond) -->
+            <path d="M172,141 L181,150 L172,159 L163,150 Z" fill="#4B2ED6" stroke="#fff" stroke-width="1.5"/>
+            <text class="qlbl" x="150" y="176" text-anchor="middle">new doc Q</text>
+
+            <text class="pnote" x="200" y="248" text-anchor="middle">position ≈ similarity · ring = the k nearest neighbors</text>
+          </svg>
+        </div>
+
+        <div class="leg">
+          <span><i class="q"></i> new document Q</span>
+          <span><i class="w"></i> greedy walk from entry</span>
+          <span><i class="k"></i> neighbors it lands on</span>
+          <span><i class="o"></i> other documents</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT · how to read it + what happens on arrival -->
+    <div class="col">
+      <div class="card">
+        <h2>Reading the picture</h2>
+        <ul class="steps">
+          <li>Each dot is a <b>document</b>, placed by its embedding — closer dots are more
+            similar. <span class="aside">64 dimensions, flattened to 2D here.</span></li>
+          <li>The ring around a dot covers its <b>N nearest neighbors</b> — its reach. Every dot
+            has one; a few are drawn to keep it legible.</li>
+          <li>The thin links are the stored neighbor edges — this <i>is</i> the HNSW base layer.</li>
+          <li>The search starts at an <b>entry point</b> on the far side and walks
+            neighbor→neighbor, each hop landing closer, until it steps onto Q's disk — it never
+            scans every dot.</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h2>When a new document arrives</h2>
+        <ol class="steps">
+          <li>Embed it → it drops in as point <b>Q</b>.</li>
+          <li>Find which rings Q falls inside — its nearest neighbors.
+            <span class="aside">HNSW navigates there in ~O(log N), without testing all N rings (slide 2).</span></li>
+          <li>Those become Q's <b>index links</b> and the source docs whose entities earn an
+            <span class="b">EMBEDDED</span> edge to Q's.</li>
+        </ol>
+        <p class="def" style="margin-top:.55em">The closer Q sits, the smaller the distance
+          <span class="exp">d = 1 − cos</span> and the larger the edge weight
+          <span class="exp">(1 + cos) / 2</span>.</p>
+      </div>
+    </div>
+  </div>
+
+  <footer class="foot">
+    <div class="tbls"><b>The ring is the intuition; HNSW is the machinery</b> — it finds the
+      landing neighborhood without checking all <span class="t">N</span> rings.</div>
+    <div class="cta">Q's neighbors → entities → <code>graph_edges</code></div>
+  </footer>
+
+</main>
+
+<script>
+  // Reuse the app's per-vector strip motif: indigo = positive dims, amber = negative.
+  // Deterministic pattern (no RNG) so the slide renders identically every time / in print.
+  const CELLS = 40;
+  function paintStrip(el, seed){
+    let x = seed;
+    for(let i=0;i<CELLS;i++){
+      // cheap deterministic pseudo-noise, stable across renders
+      x = (x * 1103515245 + 12345) & 0x7fffffff;
+      const v = ((x >> 8) % 1000) / 1000;      // 0..1
+      const positive = v > 0.5;
+      const mag = Math.abs(v - 0.5) * 2;        // 0..1 intensity
+      const cell = document.createElement('i');
+      const base = positive ? '75,46,214' : '201,122,25';
+      cell.style.background = `rgba(${base}, ${(0.18 + mag*0.82).toFixed(3)})`;
+      el.appendChild(cell);
+    }
+  }
+  document.querySelectorAll('.strip[data-strip]').forEach((el, i) => {
+    paintStrip(el, [97, 613, 1451][i] || (i + 1) * 131);
+  });
+
+  // Corpus grid (slide 2): 126 indexed vectors, 5 returned by the TOP-k query.
+  const corpus = document.getElementById('corpus');
+  if(corpus){
+    const HITS = new Set([22, 47, 63, 89, 112]);   // the 5 nearest neighbors
+    for(let i=0;i<126;i++){
+      const c = document.createElement('i');
+      if(HITS.has(i)) c.className = 'hit';
+      corpus.appendChild(c);
+    }
+  }
+</script>
+</body>
+</html>

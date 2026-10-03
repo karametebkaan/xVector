@@ -14,6 +14,9 @@
     --signal:#4B2ED6;
     --signal-soft:#EDE9FD;
     --warm:#C97A19;
+    --org:#0E7C86;
+    --facility:#A6317D;
+    --loc:#3B7A2E;
     --good:#1F8A6D;
     --bad:#C4304A;
     --mono: ui-monospace, SFMono-Regular, Menlo, "Cascadia Mono", Consolas, "Liberation Mono", monospace;
@@ -212,7 +215,8 @@ Separate each one with a blank line by default — every paragraph becomes one r
           <label for="extractProvider">Extraction</label>
           <select id="extractProvider">
             <option value="local">Local heuristic (offline)</option>
-            <option value="llm">LLM — chat completions</option>
+            <option value="claude">Claude (Anthropic)</option>
+            <option value="gemini">Gemini (Google)</option>
           </select>
         </div>
         <div class="field">
@@ -224,9 +228,25 @@ Separate each one with a blank line by default — every paragraph becomes one r
           </select>
         </div>
       </div>
-      <div id="llmOpts" style="display:none">
-        <div class="field"><label for="llmUrl">Chat endpoint</label><input type="text" id="llmUrl" placeholder="https://host/v1/chat/completions"></div>
-        <div class="field"><label for="llmModel">Chat model</label><input type="text" id="llmModel" placeholder="gpt-4o-mini"></div>
+      <div id="claudeOpts" style="display:none">
+        <div class="field">
+          <label for="claudeModel">Claude model</label>
+          <select id="claudeModel">
+            <option value="claude-haiku-4-5-20251001">claude-haiku-4-5 (fast)</option>
+            <option value="claude-opus-4-8">claude-opus-4-8 (best)</option>
+          </select>
+        </div>
+        <p class="hint">Runs through the <code>/claude</code> route using the CLI stored login. No API key in the browser.</p>
+      </div>
+      <div id="geminiOpts" style="display:none">
+        <div class="field">
+          <label for="geminiModel">Gemini model</label>
+          <select id="geminiModel">
+            <option value="gemini-2.5-flash">gemini-2.5-flash (fast)</option>
+            <option value="gemini-2.5-pro">gemini-2.5-pro (best)</option>
+          </select>
+        </div>
+        <p class="hint">Runs through the <code>/gemini</code> route (Vertex). Run <code>gcloud auth login</code> once.</p>
       </div>
       <div id="resolveApiOpts" style="display:none">
         <div class="field"><label for="resolveUrl">Resolver endpoint</label><input type="text" id="resolveUrl" placeholder="https://host/resolve"></div>
@@ -245,6 +265,7 @@ Separate each one with a blank line by default — every paragraph becomes one r
         <select id="provider">
           <option value="local">Built in — deterministic, offline</option>
           <option value="api">HTTP API — OpenAI-compatible /v1/embeddings</option>
+          <option value="ollama">Ollama — native (local models)</option>
         </select>
       </div>
       <div id="localOpts">
@@ -280,6 +301,22 @@ Separate each one with a blank line by default — every paragraph becomes one r
           </select>
         </div>
         <p class="hint">Truncating suits Matryoshka models like <code>text-embedding-3-*</code>. For anything else, projecting preserves distances better.</p>
+      </div>
+      <div id="ollamaOpts" style="display:none">
+        <div class="field">
+          <label for="ollamaUrl">Ollama base URL</label>
+          <input type="text" id="ollamaUrl" value="/ollama" />
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="ollamaEmbedModel">Embedding model</label>
+            <select id="ollamaEmbedModel"></select>
+          </div>
+          <div class="field" style="max-width:120px;align-self:end">
+            <button type="button" class="ghost" id="btnOllamaRefresh">Refresh</button>
+          </div>
+        </div>
+        <p class="hint">Models come from <code>/api/tags</code>, which doesn't label embed vs chat — pick an embedding model like <code>nomic-embed-text</code>. Output over 64 dims is projected down (the "ask for 64" option doesn't apply to Ollama).</p>
       </div>
     </div>
 
@@ -379,6 +416,27 @@ Separate each one with a blank line by default — every paragraph becomes one r
           <label for="gPrefix">Table prefix</label>
           <input type="text" id="gPrefix" value="graph">
         </div>
+        <div class="field" style="max-width:200px">
+          <label for="gName">Graph name</label>
+          <input type="text" id="gName" placeholder="entity_graph_<stamp>">
+        </div>
+        <div class="field" style="max-width:200px">
+          <label for="writeMode">Write mode</label>
+          <select id="writeMode">
+            <option value="recreate">Recreate (drop + rebuild)</option>
+            <option value="append">Append (incremental)</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div class="field" style="max-width:110px">
+          <label for="knnK">kNN k</label>
+          <input type="number" id="knnK" value="20" min="1" max="1000">
+        </div>
+        <div class="field" style="max-width:140px">
+          <label for="knnBeta">β max cos-dist</label>
+          <input type="number" id="knnBeta" value="0.35" min="0" max="2" step="0.01">
+        </div>
         <div class="field">
           <label for="threshold">Min weight — <span id="thVal">0.50</span></label>
           <input type="range" id="threshold" min="0" max="1" step="0.01" value="0.5">
@@ -386,11 +444,16 @@ Separate each one with a blank line by default — every paragraph becomes one r
       </div>
       <div class="btns">
         <button class="go" id="btnBuildGraph">Build graph</button>
-        <button id="btnStoreGraph">Store graph in Kinetica</button>
+        <button id="btnAppendBatch">Append batch to Kinetica</button>
         <button class="ghost" id="btnGraphSql">Copy graph SQL</button>
       </div>
       <div class="bar" id="gbar"><span></span></div>
       <div id="graphOut"><div class="empty">No graph built yet.</div></div>
+      <div class="field" style="margin-top:12px">
+        <label for="graphSqlBox">Graph SQL — editable, runs top to bottom</label>
+        <textarea id="graphSqlBox" rows="10" spellcheck="false" placeholder="Build or Append to populate; edit freely, then Run."></textarea>
+      </div>
+      <div class="btns"><button class="go" id="btnRunGraphSql">Run SQL in Kinetica</button></div>
     </div>
   </div>
 </div>
@@ -408,7 +471,8 @@ const DIM = 64;
 const $ = id => document.getElementById(id);
 let DOCS = [];           // {id, text, tokens, vec:Float64Array}
 let ENTITIES = [];       // {name, label, docIds, count, aliases}
-let EDGES = [];          // {node1, node2, type, weight}
+let EDGES = [];          // {node1, node2, label, edge_kind, weight, sum_wv, sum_w}
+let RELATIONS = [];      // {subject, predicate, object, docIds} from the last LLM extraction
 let LAST_TABLE = "";     // fully qualified name of the last successful write
 
 /* ---------------- console ---------------- */
@@ -527,8 +591,8 @@ function projection(src){
   PROJ_SRC = src;
   return PROJ;
 }
-function reduceVec(arr){
-  const mode = $("reduce").value;
+function reduceVec(arr, modeOverride){
+  const mode = modeOverride || $("reduce").value;
   if (arr.length === DIM) return l2norm(Float64Array.from(arr));
   if (mode === "project"){
     const P = projection(arr.length);
@@ -569,6 +633,51 @@ async function embedRemote(texts){
     }
   }
   return out;
+}
+async function embedOllama(texts){
+  const base  = ($("ollamaUrl").value.trim().replace(/\/+$/,"")) || "/ollama";
+  const model = $("ollamaEmbedModel").value.trim();
+  if (!model) throw new Error("Pick an Ollama embedding model (Refresh to load the list)");
+  const size  = Math.max(1, parseInt($("apiBatch").value,10) || 16);
+  const rmode = $("reduce").value === "ask" ? "project" : $("reduce").value;
+  const out = [];
+  for (let i=0;i<texts.length;i+=size){
+    const chunk = texts.slice(i, i+size);
+    log("embedding "+(i+1)+"–"+(i+chunk.length)+" of "+texts.length+" via "+model);
+    const res = await fetch(base+"/api/embed", {method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({model, input: chunk, truncate:true})});
+    const txt = await res.text();
+    if (!res.ok) throw new Error("Ollama /api/embed returned "+res.status+": "+txt.slice(0,300));
+    let json; try { json = JSON.parse(txt); } catch(e){ throw new Error("Ollama sent back something that isn't JSON: "+txt.slice(0,200)); }
+    const rows = pickEmbeddings(json, chunk.length);
+    for (let k=0;k<rows.length;k++)
+      out.push({ vec: reduceVec(rows[k], rmode), tokens: tokenize(chunk[k]).length, srcDim: rows[k].length });
+  }
+  return out;
+}
+
+async function ollamaModels(){
+  const base = ($("ollamaUrl").value.trim().replace(/\/+$/,"")) || "/ollama";
+  const res = await fetch(base+"/api/tags");
+  if (!res.ok) throw new Error("/api/tags returned "+res.status);
+  const j = JSON.parse(await res.text());
+  return (j.models||[]).map(m => m.name).filter(Boolean);
+}
+function fillModelSelect(sel, names){
+  if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = "";
+  for (const n of names){ const o = document.createElement("option"); o.value = n; o.textContent = n; sel.appendChild(o); }
+  if (names.includes(cur)) sel.value = cur;
+}
+async function refreshOllamaModels(){
+  try {
+    const names = await ollamaModels();
+    fillModelSelect($("ollamaEmbedModel"), names);
+    log("Ollama: "+names.length+" model(s) available", names.length ? "ok" : "warn");
+  } catch(e){
+    log("Can't reach Ollama at "+(($("ollamaUrl").value.trim())||"/ollama")+" — is `ollama serve` running and did you start serve.py with --ollama? ("+e.message+")", "err");
+  }
 }
 
 /* ---------------- splitting ---------------- */
@@ -633,13 +742,56 @@ function render(){
 /* CORE:BEGIN */
 function esc(s){ return String(s).replace(/'/g, "''").replace(/\u0000/g,""); }
 function num(x){ return String(Number(x.toFixed(6))); }
+function pickEmbeddings(json, expected){
+  let rows;
+  if (json && Array.isArray(json.embeddings)) rows = json.embeddings;               // Ollama native
+  else if (json && Array.isArray(json.data)) rows = json.data.map(r => r.embedding || r); // OpenAI-compatible
+  else if (Array.isArray(json)) rows = json;                                         // bare array
+  else throw new Error("No embeddings array in the response");
+  if (expected !== undefined && rows.length !== expected)
+    throw new Error("Asked for "+expected+" vectors, got "+rows.length);
+  for (const r of rows) if (!Array.isArray(r)) throw new Error("An embedding row is not an array");
+  return rows;
+}
 /* CORE:END */
 
 /* CORE:BEGIN */
 const TITLES = new Set(["mr","mrs","ms","miss","dr","prof","professor","president","ceo","cfo","cto","senator","governor","mayor","sir","lord","dame","rev","gen","col","capt","sgt","judge","justice"]);
 const ARTICLES = new Set(["the","a","an"]);
-const BIZ_WORDS = new Set(["inc","llc","ltd","corp","corporation","co","company","gmbh","plc","lp","llp","group","holdings","partners","systems","technologies","technology","labs","laboratories","bank","capital","ventures","university","college","institute","hospital","clinic","airport","station","stadium","museum","library","hotel","foundation","association","agency","department","ministry","committee","center","centre","school","church","factory","plant","mall","market","store","university"]);
 const CONNECTORS = new Set(["of","and","the","for","&"]);
+// Five-type ontology (single source of truth). colorVar -> :root CSS var; strategy -> disambiguation strategy.
+// Declared with var (not const) so the test harness's vm context exposes it as a property.
+var TYPES = {
+  People:       { colorVar:"--signal",   strategy:"person" },
+  Business:     { colorVar:"--warm",     strategy:"core"   },
+  Organization: { colorVar:"--org",      strategy:"core"   },
+  Facility:     { colorVar:"--facility", strategy:"norm"   },
+  Location:     { colorVar:"--loc",      strategy:"norm"   },
+};
+// Local-extractor keyword sets. Precedence: business suffix > facility > org > location > people.
+const BIZ_SUFFIX_WORDS = new Set(["inc","llc","ltd","corp","corporation","co","company","gmbh","plc","lp","llp","holdings","partners","ventures","capital"]);
+const FACILITY_WORDS = new Set(["airport","stadium","museum","hospital","clinic","hotel","station","mall","plant","factory","library","theater","theatre","arena","center","centre","terminal","port"]);
+const ORG_WORDS = new Set(["agency","department","ministry","committee","university","college","institute","school","foundation","association","bank","church","commission","bureau"]);
+// Small built-in gazetteer; anything not listed stays null rather than guessing.
+const LOCATIONS = new Set(["arlington","brooklyn","manhattan","vienna","paris","london","tokyo","berlin","madrid","rome","moscow","beijing","seattle","boston","denver","austin","dallas","houston","atlanta","miami","texas","california","virginia","germany","france","italy","japan","china","india","canada","mexico","brazil"]);
+const PREDICATES = new Set(["WORKS_AT","FOUNDED","LEADS","MEMBER_OF","LOCATED_IN","HEADQUARTERED_IN","PART_OF","OWNS","AFFILIATED_WITH","VISITED","RELATED_TO"]);
+function normLabel(v){
+  const s = String(v||"").trim().toLowerCase();
+  if (s === "people" || s === "person") return "People";
+  if (s === "business") return "Business";
+  if (s === "organization" || s === "organisation") return "Organization";
+  if (s === "facility") return "Facility";
+  if (s === "location") return "Location";
+  if (/busin|compan|corp|\binc\b|\bllc\b|firm/.test(s)) return "Business";
+  if (/organi|agenc|govern|\bngo\b|univers|college|institut|associat|ministr|departmen|committee|foundation|bank|church|school/.test(s)) return "Organization";
+  if (/facilit|airport|stadium|hospital|museum|plant|station|venue|arena|terminal|hotel|mall/.test(s)) return "Facility";
+  if (/locat|city|country|region|place|town|state|province/.test(s)) return "Location";
+  return "People";
+}
+function normPredicate(v){
+  const s = String(v||"").trim().toUpperCase().replace(/[\s-]+/g,"_");
+  return PREDICATES.has(s) ? s : "RELATED_TO";
+}
 
 function isCap(tok){ return /^[A-Z][A-Za-z.'&-]*$/.test(tok); }
 function isAcronym(tok){ return /^[A-Z]{2,}$/.test(tok); }
@@ -648,10 +800,14 @@ function bareWord(tok){ return tok.replace(/[.,;:!?()'"]+$/,"").replace(/^[.,;:!
 function classifySpan(nameTokens, personFlag){
   if (!nameTokens.length) return null;
   const lower = nameTokens.map(t => bareWord(t).toLowerCase());
-  if (lower.some(t => BIZ_WORDS.has(t))) return "Business";
+  const joined = lower.join(" ");
+  if (lower.some(t => BIZ_SUFFIX_WORDS.has(t))) return "Business";
+  if (lower.some(t => FACILITY_WORDS.has(t)))   return "Facility";
+  if (lower.some(t => ORG_WORDS.has(t)))        return "Organization";
+  if (LOCATIONS.has(joined))                    return "Location";
   if (nameTokens.length === 1 && isAcronym(bareWord(nameTokens[0]))) return "Business";
-  if (personFlag) return "Person";
-  if (nameTokens.length >= 2) return "Person";
+  if (personFlag) return "People";
+  if (nameTokens.length >= 2) return "People";
   return null;
 }
 
@@ -692,7 +848,7 @@ const BIZ_SUFFIX = new Set(["inc","llc","ltd","corp","corporation","co","company
 
 function normalizeName(name){
   return String(name).trim().replace(/\s+/g," ").replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu,"")
-    .replace(/'s$/i,"").replace(/[.,]/g,"").toLowerCase();
+    .replace(/'s$/i,"").replace(/[.,]/g,"").toLowerCase().replace(/^(the|a|an)\s+/,"");
 }
 function givenCompatible(a, b){
   a = a.toLowerCase().replace(/\.$/,""); b = b.toLowerCase().replace(/\.$/,"");
@@ -706,11 +862,23 @@ function personName(surface){
   return { given: t.slice(0,-1), sur: (t[t.length-1]||"").toLowerCase() };
 }
 function businessCore(surface){
-  const t = surface.toLowerCase().replace(/[.,]/g,"").split(/\s+/).filter(w => !BIZ_SUFFIX.has(w));
+  const t = surface.toLowerCase().replace(/[.,]/g,"").replace(/^(the|a|an)\s+/,"").split(/\s+/).filter(w => !BIZ_SUFFIX.has(w));
   return t.join(" ");
 }
 function longest(surfaces){
   return surfaces.slice().sort((x,y) => y.split(/\s+/).length - x.split(/\s+/).length || y.length - x.length)[0];
+}
+function sameEntity(label, surfaceA, surfaceB){
+  const strat = (TYPES[label] && TYPES[label].strategy) || "norm";
+  if (strat === "person"){
+    const a = personName(surfaceA), b = personName(surfaceB);
+    if (a.sur !== b.sur) return false;
+    const n = Math.min(a.given.length, b.given.length);
+    for (let i=0;i<n;i++) if (!givenCompatible(a.given[i], b.given[i])) return false;
+    return true;
+  }
+  if (strat === "core") return businessCore(surfaceA) === businessCore(surfaceB);
+  return normalizeName(surfaceA) === normalizeName(surfaceB);   // norm
 }
 function mergeMentions(mentions, mode){
   // group into buckets of arrays of mentions
@@ -727,19 +895,7 @@ function mergeMentions(mentions, mode){
       else buckets.push({ label: m.label, key, items: [m] });
       continue;
     }
-    if (m.label === "Person"){
-      const pn = personName(m.surface);
-      put(m, b => {
-        const bn = personName(b.items[0].surface);
-        if (bn.sur !== pn.sur) return false;
-        const n = Math.min(bn.given.length, pn.given.length);
-        for (let i=0;i<n;i++) if (!givenCompatible(bn.given[i], pn.given[i])) return false;
-        return true;
-      });
-    } else {
-      const core2 = businessCore(m.surface);
-      put(m, b => businessCore(b.items[0].surface) === core2);
-    }
+    put(m, b => sameEntity(m.label, b.items[0].surface, m.surface));
   }
   return buckets.map(b => {
     const surfaces = b.items.map(x => x.surface);
@@ -747,6 +903,133 @@ function mergeMentions(mentions, mode){
     const aliases = [...new Set(surfaces)].sort();
     return { name: longest(surfaces), label: b.label, docIds, count: b.items.length, aliases };
   });
+}
+function blockKey(name, label){
+  const strat = (TYPES[label] && TYPES[label].strategy) || "norm";
+  if (strat === "person") return personName(name).sur;
+  if (strat === "core")   return businessCore(name);
+  return normalizeName(name);   // norm
+}
+function unionSorted(a, b){ return [...new Set([...(a||[]), ...(b||[])])]; }
+
+function resolveIncremental(mentions, existingNodes){
+  const existing = (existingNodes||[]).map(n => ({
+    name: n.name, label: n.label,
+    docIds: (n.docIds||[]).slice(),
+    aliases: (n.aliases||[]).slice(),
+    count: n.count||0,
+    block_key: n.block_key || blockKey(n.name, n.label)
+  }));
+  const keyOf = e => e.label+"\u0000"+e.block_key;
+  const byKey = new Map();
+  for (const n of existing){ const k = keyOf(n); if (!byKey.has(k)) byKey.set(k, []); byKey.get(k).push(n); }
+
+  const fresh = mergeMentions(mentions, "heuristic");
+  const nodeUpserts = [], membership = [];
+  for (const e of fresh){
+    const bk = blockKey(e.name, e.label);
+    const k = e.label+"\u0000"+bk;
+    const cands = byKey.get(k) || [];
+    const match = cands.find(n => sameEntity(e.label, n.name, e.name));
+    let canonical;
+    if (match){
+      match.docIds = unionSorted(match.docIds, e.docIds).sort((a,b)=>a-b);
+      match.aliases = unionSorted(match.aliases, [e.name, ...e.aliases]).sort();
+      match.count = match.count + e.count;
+      canonical = match;                       // PK name unchanged
+    } else {
+      canonical = { name:e.name, label:e.label,
+        docIds:e.docIds.slice().sort((a,b)=>a-b), count:e.count,
+        aliases:unionSorted([e.name], e.aliases).sort(), block_key:bk };
+      cands.push(canonical); byKey.set(k, cands);
+    }
+    nodeUpserts.push(canonical);
+    for (const d of e.docIds) membership.push({ node: canonical.name, docId: d, label: e.label });
+  }
+  return { nodeUpserts, membership };
+}
+// var (not const): the test harness reads core.EXTRACT_SCHEMA via the vm context
+// object, and top-level const/let do not attach to it — mirrors `var TYPES` above.
+var EXTRACT_SCHEMA = {
+  type:"object",
+  properties:{
+    entities:{ type:"array", items:{ type:"object", properties:{
+      name:{type:"string"},
+      label:{type:"string", enum:["People","Business","Organization","Facility","Location"]},
+      doc_ids:{type:"array", items:{type:"integer"}}
+    }, required:["name","label","doc_ids"] } },
+    relations:{ type:"array", items:{ type:"object", properties:{
+      subject:{type:"string"},
+      predicate:{type:"string", enum:["WORKS_AT","FOUNDED","LEADS","MEMBER_OF","LOCATED_IN","HEADQUARTERED_IN","PART_OF","OWNS","AFFILIATED_WITH","VISITED","RELATED_TO"]},
+      object:{type:"string"},
+      doc_ids:{type:"array", items:{type:"integer"}}
+    }, required:["subject","predicate","object","doc_ids"] } }
+  },
+  required:["entities","relations"]
+};
+function extractionPrompt(){
+  return "You are an entity and relation extractor. Read every document (each prefixed with its [n] id). "+
+    "Extract EVERY distinct named entity and label each as exactly one of: "+
+    "People (a human), Business (a for-profit company), Organization (government, agency, NGO, academic, or association), "+
+    "Facility (a built structure or venue: airport, stadium, hospital, museum, plant), or Location (a geographic place). "+
+    "Then extract relations between the entities using ONLY these predicates: "+
+    "WORKS_AT, FOUNDED, LEADS, MEMBER_OF, LOCATED_IN, HEADQUARTERED_IN, PART_OF, OWNS, AFFILIATED_WITH, VISITED, or RELATED_TO (fallback). "+
+    "For each entity and relation, list every doc id [n] it appears in. "+
+    "Return ONLY JSON of the form: "+
+    "{\"entities\":[{\"name\":\"...\",\"label\":\"People|Business|Organization|Facility|Location\",\"doc_ids\":[int]}],"+
+    "\"relations\":[{\"subject\":\"...\",\"predicate\":\"WORKS_AT|...\",\"object\":\"...\",\"doc_ids\":[int]}]}.";
+}
+function foldExtraction(obj, docs){
+  const valid = new Set(docs.map(d => d.id));
+  const recover = (surface, ids) => {
+    let out = (Array.isArray(ids) ? ids : []).filter(n => valid.has(n));
+    if (!out.length){
+      const needle = String(surface).toLowerCase();
+      out = docs.filter(d => d.text.toLowerCase().includes(needle)).map(d => d.id);
+    }
+    return out;
+  };
+  const mentions = [];
+  for (const e of (obj && obj.entities || [])){
+    const surface = String(e.name || "").trim();
+    if (!surface) continue;
+    const label = normLabel(e.label);
+    for (const id of recover(surface, e.doc_ids)) mentions.push({surface, label, docId:id});
+  }
+  const relations = [];
+  for (const r of (obj && obj.relations || [])){
+    const subject = String(r.subject || "").trim();
+    const object  = String(r.object  || "").trim();
+    if (!subject || !object) continue;
+    relations.push({subject, predicate:normPredicate(r.predicate), object, docIds:recover(subject, r.doc_ids)});
+  }
+  return {mentions, relations};
+}
+function buildRelationEdges(relations, entities){
+  const index = [];
+  for (const e of (entities||[])){
+    const forms = [e.name, ...((e.aliases)||[])];
+    for (const f of forms) index.push({norm:normalizeName(f), name:e.name, label:e.label});
+  }
+  const resolve = (surface) => {
+    const key = normalizeName(surface);
+    const hit = index.find(x => x.norm === key);
+    if (hit) return hit;
+    for (const e of (entities||[])) if (sameEntity(e.label, e.name, surface)) return {name:e.name, label:e.label};
+    return null;
+  };
+  const acc = new Map(); let dropped = 0;
+  for (const r of (relations||[])){
+    const s = resolve(r.subject), o = resolve(r.object);
+    if (!s || !o){ dropped++; continue; }
+    if (s.name === o.name){ dropped++; continue; }
+    const predicate = normPredicate(r.predicate);
+    const key = s.name+"\u0000"+o.name+"\u0000"+predicate;
+    if (acc.has(key)) continue;
+    acc.set(key, {node1:s.name, node2:o.name, label:predicate, edge_kind:"relation",
+      weight:1.0, sum_wv:1.0, sum_w:1.0, docIds:(r.docIds||[]).slice()});
+  }
+  return {edges:[...acc.values()], dropped};
 }
 /* CORE:END */
 
@@ -756,11 +1039,42 @@ function cosineOf(a, b){
   for (let i=0;i<n;i++) s += a[i]*b[i];
   return s;
 }
-function edgeType(la, lb){
-  const p = (la === "Person") + (lb === "Person");
-  if (p === 2) return "person-person";
-  if (p === 0) return "business-business";
-  return "person-business";
+function edgeDelta(cos, eps){
+  eps = (eps === undefined) ? 1e-6 : eps;
+  const d = 1 - cos;
+  const w = 1 / (eps + d);
+  const v = (1 + cos) / 2;
+  return { w, v, wv: w*v };
+}
+function mergeEdgeAccum(existing, delta){
+  const sum_wv = ((existing && existing.sum_wv) || 0) + delta.d_wv;
+  const sum_w  = ((existing && existing.sum_w)  || 0) + delta.d_w;
+  return { sum_wv, sum_w, weight: sum_w === 0 ? 0 : sum_wv / sum_w };
+}
+function docPairContributions(pairs, membership){
+  const acc = new Map();
+  const add = (na, la, nb, lb, del) => {
+    if (na === nb) return;
+    const flip = nb < na;
+    const n1 = flip ? nb : na, n2 = flip ? na : nb;
+    const key = n1+"\u0000"+n2;
+    let cur = acc.get(key);
+    if (!cur){ cur = {node1:n1, node2:n2, label:"EMBEDDED", edge_kind:"embedded", d_wv:0, d_w:0}; acc.set(key,cur); }
+    cur.d_wv += del.wv; cur.d_w += del.w;
+  };
+  for (const p of pairs){
+    const A = membership.get(p.i) || [];
+    if (p.i === p.j){
+      const del = edgeDelta(1);
+      for (let x=0;x<A.length;x++) for (let y=x+1;y<A.length;y++)
+        add(A[x].node, A[x].label, A[y].node, A[y].label, del);
+    } else {
+      const B = membership.get(p.j) || [];
+      const del = edgeDelta(p.cos);
+      for (const a of A) for (const b of B) add(a.node, a.label, b.node, b.label, del);
+    }
+  }
+  return [...acc.values()];
 }
 function computeEdges(entities, docVec, eps){
   eps = (eps === undefined) ? 1e-6 : eps;
@@ -783,7 +1097,7 @@ function computeEdges(entities, docVec, eps){
       if (sumW === 0) continue;
       const weight = sumWV / sumW;
       const [n1, n2] = A.name < B.name ? [A.name, B.name] : [B.name, A.name];
-      edges.push({ node1: n1, node2: n2, type: edgeType(A.label, B.label), weight });
+      edges.push({ node1: n1, node2: n2, label: "EMBEDDED", edge_kind: "embedded", weight, sum_wv: sumWV, sum_w: sumW });
     }
   }
   edges.sort((x,y) => y.weight - x.weight);
@@ -807,46 +1121,140 @@ function graphDdl(opts){
   if (opts.createMode === "skip") return null;
   const head = k => (opts.createMode === "replace" ? "CREATE OR REPLACE TABLE " : "CREATE TABLE IF NOT EXISTS ")+graphTableName(opts.prefix,k,opts.stamp,opts.schema);
   const nodes = head("nodes")+"\n(\n"+
-    "    node      CHAR(64) NOT NULL,\n"+
-    "    label     VARCHAR[] NOT NULL,\n"+
-    "    doc_ids   INT[] NOT NULL,\n"+
-    "    doc_count INT,\n"+
-    "    aliases   VARCHAR[],\n"+
-    "    created_at TIMESTAMP NOT NULL\n)";
+    "    node       CHAR(64) NOT NULL,\n"+
+    "    label      VARCHAR[] NOT NULL,\n"+
+    "    doc_ids    INT[] NOT NULL,\n"+
+    "    doc_count  INT,\n"+
+    "    aliases    VARCHAR[],\n"+
+    "    block_key  CHAR(64),\n"+
+    "    created_at TIMESTAMP NOT NULL,\n"+
+    "    PRIMARY KEY (node)\n)";
   const edges = head("edges")+"\n(\n"+
     "    node1  CHAR(64) NOT NULL,\n"+
     "    node2  CHAR(64) NOT NULL,\n"+
-    "    label  VARCHAR[] NOT NULL,\n"+
+    "    label      VARCHAR[] NOT NULL,\n"+
+    "    edge_label CHAR(32) NOT NULL,\n"+
+    "    edge_kind  CHAR(16) NOT NULL,\n"+
     "    weight FLOAT NOT NULL,\n"+
-    "    created_at TIMESTAMP NOT NULL\n)";
+    "    sum_wv DOUBLE,\n"+
+    "    sum_w  DOUBLE,\n"+
+    "    created_at TIMESTAMP NOT NULL,\n"+
+    "    PRIMARY KEY (node1, node2, edge_label)\n)";
   return { nodes, edges };
+}
+function membershipDdl(opts){
+  if (opts.createMode === "skip") return null;
+  const head = (opts.createMode === "replace" ? "CREATE OR REPLACE TABLE " : "CREATE TABLE IF NOT EXISTS ")+graphTableName(opts.prefix,"membership",opts.stamp,opts.schema);
+  return head+"\n(\n"+
+    "    node   CHAR(64) NOT NULL,\n"+
+    "    doc_id INT NOT NULL,\n"+
+    "    label  VARCHAR[] NOT NULL\n)";
 }
 function nodeInserts(entities, opts){
   const t = graphTableName(opts.prefix,"nodes",opts.stamp,opts.schema);
   const size = Math.max(1, opts.batchSize||50);
-  const cols = "(node, label, doc_ids, doc_count, aliases, created_at)";
+  const head = "INSERT INTO "+(opts.upsert ? "/* KI_HINT_UPDATE_ON_EXISTING_PK */ " : "")+t;
+  const cols = "(node, label, doc_ids, doc_count, aliases, block_key, created_at)";
   const out = [];
   for (let i=0;i<entities.length;i+=size){
     const rows = entities.slice(i,i+size).map(e =>
       "    ('"+esc(guardName(e.name))+"', "+arrayLit([e.label],"str")+", "+arrayLit(e.docIds,"int")+", "+
-      (parseInt(e.count,10)||e.docIds.length)+", "+arrayLit(e.aliases,"str")+", '"+opts.createdAt+"')");
-    out.push("INSERT INTO "+t+"\n"+cols+"\nVALUES\n"+rows.join(",\n"));
+      (parseInt(e.count,10)||e.docIds.length)+", "+arrayLit(e.aliases,"str")+", '"+
+      esc(guardName(e.block_key || blockKey(e.name, e.label)))+"', '"+opts.createdAt+"')");
+    out.push(head+"\n"+cols+"\nVALUES\n"+rows.join(",\n"));
   }
   return out;
 }
 function edgeInserts(edges, opts, threshold){
   const t = graphTableName(opts.prefix,"edges",opts.stamp,opts.schema);
   const size = Math.max(1, opts.batchSize||50);
-  const cols = "(node1, node2, label, weight, created_at)";
+  const cols = "(node1, node2, label, edge_label, edge_kind, weight, sum_wv, sum_w, created_at)";
   const kept = edges.filter(e => e.weight >= threshold);
   const out = [];
   for (let i=0;i<kept.length;i+=size){
-    const rows = kept.slice(i,i+size).map(e =>
-      "    ('"+esc(guardName(e.node1))+"', '"+esc(guardName(e.node2))+"', "+arrayLit([e.type],"str")+", "+num(e.weight)+", '"+opts.createdAt+"')");
+    const rows = kept.slice(i,i+size).map(e => {
+      const lbl = e.label || "EMBEDDED", kind = e.edge_kind || "embedded";
+      return "    ('"+esc(guardName(e.node1))+"', '"+esc(guardName(e.node2))+"', "+arrayLit([lbl],"str")+", '"+
+        esc(lbl.slice(0,32))+"', '"+esc(kind)+"', "+num(e.weight)+", "+
+        num(e.sum_wv!=null?e.sum_wv:e.weight)+", "+num(e.sum_w!=null?e.sum_w:1)+", '"+opts.createdAt+"')";
+    });
     out.push("INSERT INTO "+t+"\n"+cols+"\nVALUES\n"+rows.join(",\n"));
   }
   return out;
 }
+function edgeUpserts(edges, opts){
+  const t = graphTableName(opts.prefix,"edges",opts.stamp,opts.schema);
+  const size = Math.max(1, opts.batchSize||50);
+  const cols = "(node1, node2, label, edge_label, edge_kind, weight, sum_wv, sum_w, created_at)";
+  const out = [];
+  for (let i=0;i<edges.length;i+=size){
+    const rows = edges.slice(i,i+size).map(e => {
+      const lbl = e.label || "EMBEDDED", kind = e.edge_kind || "embedded";
+      return "    ('"+esc(guardName(e.node1))+"', '"+esc(guardName(e.node2))+"', "+arrayLit([lbl],"str")+", '"+
+        esc(lbl.slice(0,32))+"', '"+esc(kind)+"', "+num(e.weight)+", "+num(e.sum_wv)+", "+num(e.sum_w)+", '"+opts.createdAt+"')";
+    });
+    out.push("INSERT INTO /* KI_HINT_UPDATE_ON_EXISTING_PK */ "+t+"\n"+cols+"\nVALUES\n"+rows.join(",\n"));
+  }
+  return out;
+}
+function membershipInserts(rows, opts){
+  const t = graphTableName(opts.prefix,"membership",opts.stamp,opts.schema);
+  const size = Math.max(1, opts.batchSize||50);
+  const cols = "(node, doc_id, label)";
+  const out = [];
+  for (let i=0;i<rows.length;i+=size){
+    const vals = rows.slice(i,i+size).map(r =>
+      "    ('"+esc(guardName(r.node))+"', "+(r.docId|0)+", "+arrayLit([r.label],"str")+")");
+    out.push("INSERT INTO "+t+"\n"+cols+"\nVALUES\n"+vals.join(",\n"));
+  }
+  return out;
+}
+function knnQuery(table, vecLit, k, beta, excludeId){
+  const dist = "COSINE_DISTANCE(embedding, '"+vecLit+"')";
+  return "SELECT TOP "+(k|0)+" doc_id, (1 - "+dist+") AS cos\n"+
+         "FROM "+table+"\n"+
+         "WHERE doc_id <> "+(excludeId|0)+" AND "+dist+" <= "+num(beta)+"\n"+
+         "ORDER BY "+dist+" ASC";
+}
+function inList(values, kind){
+  if (!values || !values.length) return "(NULL)";
+  return "("+values.map(v => kind==="int" ? (v|0) : "'"+esc(String(v))+"'").join(",")+")";
+}
+function membershipQuery(table, docIds){
+  return "SELECT node, doc_id, label FROM "+table+" WHERE doc_id IN "+inList(docIds,"int");
+}
+function edgeAccumQuery(table, names){
+  const l = inList(names,"str");
+  return "SELECT node1, node2, edge_label, sum_wv, sum_w FROM "+table+" WHERE node1 IN "+l+" OR node2 IN "+l;
+}
+function nodeBlockQuery(table, keys){
+  return "SELECT node, label, doc_ids, doc_count, aliases, block_key FROM "+table+" WHERE block_key IN "+inList(keys,"str");
+}
+function graphNameOf(opts){
+  // Resolve the CREATE GRAPH name: a user value if it is identifier-safe
+  // (it lands in DDL unquoted), else the stable default. Optional schema prefix.
+  const raw = String(opts.graphName || "").trim();
+  if (raw && /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$/.test(raw))
+    return guardName(raw);
+  return "entity_graph_"+opts.stamp;
+}
+function graphDdlMode(writeMode){
+  // Graph-table create semantics follow the graph Write mode, NOT the
+  // embeddings "On write" selector: recreate rebuilds from scratch (so plain
+  // inserts never hit an existing PK), append creates the tables if missing.
+  return writeMode === "append" ? "ifnot" : "replace";
+}
+function createGraphSql(opts){
+  const nt = graphTableName(opts.prefix,"nodes",opts.stamp,opts.schema);
+  const et = graphTableName(opts.prefix,"edges",opts.stamp,opts.schema);
+  // OR REPLACE so re-running the box rebuilds the graph from current tables
+  // instead of failing with "graph already exists".
+  return "CREATE OR REPLACE UNDIRECTED GRAPH "+graphNameOf(opts)+" (\n"+
+         "  NODES => INPUT_TABLES((SELECT * FROM "+nt+")),\n"+
+         "  EDGES => INPUT_TABLES((SELECT node1, node2, label,\n"+
+         "                         (1 - weight) AS WEIGHT_VALUESPECIFIED FROM "+et+")))";
+}
+function hnswIndexSql(table){ return "ALTER TABLE "+table+" ADD HNSW INDEX (embedding)"; }
 function graphScript(entities, edges, opts, threshold){
   const parts = [];
   const d = graphDdl(opts);
@@ -854,14 +1262,35 @@ function graphScript(entities, edges, opts, threshold){
   parts.push(...nodeInserts(entities, opts));
   parts.push(...edgeInserts(edges, opts, threshold));
   let sql = parts.join(";\n\n")+";\n";
-  const nt = graphTableName(opts.prefix,"nodes",opts.stamp,opts.schema);
-  const et = graphTableName(opts.prefix,"edges",opts.stamp,opts.schema);
-  sql += "\n-- CREATE UNDIRECTED GRAPH entity_graph_"+opts.stamp+" (\n"+
-         "--   NODES => INPUT_TABLES((SELECT * FROM "+nt+")),\n"+
-         "--   EDGES => INPUT_TABLES((SELECT node1, node2, label,\n"+
-         "--                          (1 - weight) AS WEIGHT_VALUESPECIFIED FROM "+et+")));\n";
+  sql += "\n-- Runnable graph creation (also available in the editable SQL box):\n-- "+
+         createGraphSql(opts).replace(/\n/g, "\n-- ")+"\n";
   return sql;
 }
+/* CORE:END */
+
+/* CORE:BEGIN */
+function embDdl(opts){
+  if (opts.createMode === "skip") return null;
+  const head = opts.createMode === "replace"
+    ? "CREATE OR REPLACE TABLE "+opts.table
+    : "CREATE TABLE IF NOT EXISTS "+opts.table;
+  const norm = opts.normalize ? opts.dim+", NORMALIZE" : String(opts.dim);
+  return head+"\n(\n"+
+    "    doc_id INT NOT NULL,\n"+
+    "    content VARCHAR NOT NULL,\n"+
+    "    token_count INT,\n"+
+    "    char_count INT,\n"+
+    "    embed_source VARCHAR(64),\n"+
+    "    created_at TIMESTAMP NOT NULL,\n"+
+    "    embedding VECTOR("+norm+") NOT NULL,\n"+
+    "    PRIMARY KEY (doc_id)\n"+
+    ")";
+}
+function nextIdBase(maxId){
+  const m = Number(maxId);
+  return (Number.isFinite(m) && m > 0) ? Math.floor(m) + 1 : 1;
+}
+function maxIdQuery(table){ return "SELECT MAX(doc_id) AS max_id FROM "+table; }
 /* CORE:END */
 
 function vecLiteral(v){
@@ -875,25 +1304,16 @@ function nowLiteral(){
          pad(d.getHours())+":"+pad(d.getMinutes())+":"+pad(d.getSeconds());
 }
 function ddl(){
-  const t = fqName();
-  const mode = $("createMode").value;
-  if (mode === "skip") return null;
-  const head = mode === "replace" ? "CREATE OR REPLACE TABLE "+t : "CREATE TABLE IF NOT EXISTS "+t;
-  const norm = $("normalize").checked ? DIM+", NORMALIZE" : String(DIM);
-  return head+"\n(\n"+
-    "    doc_id INT NOT NULL,\n"+
-    "    content VARCHAR NOT NULL,\n"+
-    "    token_count INT,\n"+
-    "    char_count INT,\n"+
-    "    embed_source VARCHAR(64),\n"+
-    "    created_at TIMESTAMP NOT NULL,\n"+
-    "    embedding VECTOR("+norm+") NOT NULL\n"+
-    ")";
+  return embDdl({ table: fqName(), createMode: $("createMode").value, dim: DIM, normalize: $("normalize").checked });
+}
+function embedSource(){
+  return $("provider").value === "local" ? "local-hash-64"
+       : ($("provider").value === "ollama" ? $("ollamaEmbedModel").value.trim() : $("apiModel").value.trim() || "api").slice(0,64);
 }
 function insertStatements(){
   const t = fqName();
   const size = Math.max(1, parseInt($("batchSize").value,10) || 50);
-  const src = $("provider").value === "local" ? "local-hash-64" : ($("apiModel").value.trim()||"api").slice(0,64);
+  const src = embedSource();
   const ts = nowLiteral();
   const cols = "(doc_id, content, token_count, char_count, embed_source, created_at, embedding)";
   const out = [];
@@ -921,7 +1341,7 @@ function renderEntities(){
   if (!ENTITIES.length){ host.innerHTML = '<div class="empty">No entities extracted yet.</div>'; return; }
   for (const e of ENTITIES){
     const el = document.createElement("div"); el.className = "doc";
-    const color = e.label === "Person" ? "var(--signal)" : "var(--warm)";
+    const color = "var("+((TYPES[e.label] && TYPES[e.label].colorVar) || "--muted")+")";
     const head = document.createElement("div"); head.className = "doc-head";
     head.innerHTML = '<span class="doc-id" style="color:'+color+'">'+e.label+'</span>'+
       '<span class="doc-meta">'+e.count+' mentions · docs '+e.docIds.join(", ")+'</span>';
@@ -937,6 +1357,7 @@ function renderEntities(){
 
 function graphOpts(){
   return { prefix: ($("gPrefix").value||"graph").trim(), stamp: stamp(),
+    graphName: ($("gName").value||"").trim(),
     schema: ($("kSchema").value||"").trim(), createMode: $("createMode").value,
     batchSize: Math.max(1, parseInt($("batchSize").value,10)||50), createdAt: nowLiteral() };
 }
@@ -949,37 +1370,29 @@ function renderGraph(){
   if (!EDGES.length){ host.innerHTML = '<div class="empty">No graph built yet.</div>'; return; }
   if (!kept.length){ host.innerHTML = '<div class="empty">No edges at or above '+th.toFixed(2)+'.</div>'; return; }
   const el = document.createElement("table"); el.className = "res";
-  const hr = el.insertRow(); ["source","target","type","weight"].forEach(h => { const th2=document.createElement("th"); th2.textContent=h; hr.appendChild(th2); });
+  const hr = el.insertRow(); ["source","target","label","weight"].forEach(h => { const th2=document.createElement("th"); th2.textContent=h; hr.appendChild(th2); });
   for (const e of kept){
     const tr = el.insertRow();
     tr.insertCell().textContent = e.node1;
     tr.insertCell().textContent = e.node2;
-    tr.insertCell().textContent = e.type;
+    const lc = tr.insertCell(); lc.textContent = e.label;
+    lc.style.color = "var("+(e.edge_kind === "relation" ? "--org" : "--muted")+")";
     const c = tr.insertCell(); c.className = "num"; c.textContent = e.weight.toFixed(4);
   }
   host.appendChild(el);
 }
 
 async function extractLLM(docs){
-  const url = $("llmUrl").value.trim(); const model = $("llmModel").value.trim();
-  if (!url) throw new Error("Set the chat endpoint URL");
-  const headers = {"Content-Type":"application/json"};
-  const key = $("apiKey").value.trim(); if (key) headers["Authorization"] = "Bearer "+key;
-  const sys = "Extract entities labeled Person or Business (organizations, facilities, institutions). "+
-    "Return ONLY JSON: {\"entities\":[{\"name\":\"...\",\"label\":\"Person|Business\",\"doc_ids\":[int]}]}.";
-  const usr = docs.map(d => "["+d.id+"] "+d.text).join("\n\n");
-  const res = await fetch(url, {method:"POST", headers, body: JSON.stringify({
-    model, messages:[{role:"system",content:sys},{role:"user",content:usr}],
-    temperature:0, response_format:{type:"json_object"} })});
-  const text = await res.text(); let obj;
-  try { const j = JSON.parse(text); const c = j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content; obj = JSON.parse(c || text); }
-  catch(e){ throw new Error("LLM response was not parseable JSON: "+text.slice(0,200)); }
-  const list = (obj.entities || []);
-  // flatten into mentions (one per doc_id)
-  const mentions = [];
-  for (const e of list){ const lbl = e.label === "Business" ? "Business" : "Person";
-    for (const id of (e.doc_ids||[])) mentions.push({surface:String(e.name), label:lbl, docId:id}); }
-  return mentions;
+  const provider = $("extractProvider").value;                 // "claude" | "gemini"
+  const model = provider === "claude" ? $("claudeModel").value : $("geminiModel").value;
+  const route = provider === "claude" ? "/claude" : "/gemini";
+  const prompt = extractionPrompt() + "\n\nDOCUMENTS:\n" + docs.map(d => "["+d.id+"] "+d.text).join("\n\n");
+  const res = await fetch(route, {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({prompt, schema:EXTRACT_SCHEMA, model})});
+  const text = await res.text();
+  let env; try { env = JSON.parse(text); } catch(e){ throw new Error(route+" sent non-JSON: "+text.slice(0,200)); }
+  if (env.status === "ERROR") throw new Error(env.message || (route+" error"));
+  return foldExtraction(env.data || {}, docs);                 // {mentions, relations}
 }
 
 async function resolveApi(mentions){
@@ -989,7 +1402,7 @@ async function resolveApi(mentions){
     const res = await fetch(url, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({mentions})});
     const j = JSON.parse(await res.text());
     if (Array.isArray(j.entities)) return j.entities.map(e => ({
-      name:String(e.name), label: e.label === "Business" ? "Business":"Person",
+      name:String(e.name), label: normLabel(e.label),
       docIds:[...new Set(e.doc_ids||[])].sort((a,b)=>a-b), count:(e.count||(e.doc_ids||[]).length), aliases:(e.aliases||[String(e.name)]) }));
     throw new Error("no entities array");
   } catch(e){ log("Resolver API failed ("+e.message+") — using heuristic.", "warn"); return mergeMentions(mentions, "heuristic"); }
@@ -1051,7 +1464,8 @@ $("btnEmbed").addEventListener("click", async () => {
   btn.disabled = true; btn.textContent = "Generating…";
   try {
     const t0 = performance.now();
-    const res = $("provider").value === "local" ? embedLocal(texts) : await embedRemote(texts);
+    const pv = $("provider").value;
+    const res = pv === "local" ? embedLocal(texts) : pv === "ollama" ? await embedOllama(texts) : await embedRemote(texts);
     DOCS = texts.map((t,i) => ({ id:i+1, text:t, tokens:res[i].tokens, vec:res[i].vec }));
     render();
     const ms = Math.round(performance.now()-t0);
@@ -1116,7 +1530,8 @@ $("btnSearch").addEventListener("click", async () => {
   out.innerHTML = "";
   if (!q){ log("Type something to search for.", "warn"); return; }
   try {
-    const r = $("provider").value === "local" ? embedLocal([q]) : await embedRemote([q]);
+    const pv = $("provider").value;
+    const r = pv === "local" ? embedLocal([q]) : pv === "ollama" ? await embedOllama([q]) : await embedRemote([q]);
     const lit = vecLiteral(r[0].vec);
     const t = LAST_TABLE || fqName();
     const k = Math.max(1, parseInt($("topK").value,10) || 5);
@@ -1175,7 +1590,7 @@ $("btnJson").addEventListener("click", () => {
   const payload = {
     table: fqName(),
     dimensions: DIM,
-    source: $("provider").value === "local" ? "local-hash-64" : $("apiModel").value.trim(),
+    source: embedSource(),
     generated_at: new Date().toISOString(),
     documents: DOCS.map(d => ({ doc_id:d.id, content:d.text, token_count:d.tokens, embedding: Array.from(d.vec, v => Number(v.toFixed(6))) }))
   };
@@ -1185,15 +1600,20 @@ $("btnJson").addEventListener("click", () => {
 
 /* ---------------- wiring ---------------- */
 $("provider").addEventListener("change", () => {
-  const api = $("provider").value === "api";
-  $("apiOpts").style.display = api ? "block" : "none";
-  $("localOpts").style.display = api ? "none" : "block";
+  const v = $("provider").value;
+  $("apiOpts").style.display    = v === "api"    ? "block" : "none";
+  $("ollamaOpts").style.display = v === "ollama" ? "block" : "none";
+  $("localOpts").style.display  = v === "local"  ? "block" : "none";
+  if (v === "ollama" && !$("ollamaEmbedModel").options.length) refreshOllamaModels();
 });
+$("btnOllamaRefresh").addEventListener("click", refreshOllamaModels);
 $("splitMode").addEventListener("change", () => {
   $("delim").disabled = $("splitMode").value !== "custom";
 });
 $("extractProvider").addEventListener("change", () => {
-  $("llmOpts").style.display = $("extractProvider").value === "llm" ? "block" : "none";
+  const v = $("extractProvider").value;
+  $("claudeOpts").style.display = v === "claude" ? "block" : "none";
+  $("geminiOpts").style.display = v === "gemini" ? "block" : "none";
 });
 $("resolveMode").addEventListener("change", () => {
   $("resolveApiOpts").style.display = $("resolveMode").value === "api" ? "block" : "none";
@@ -1203,13 +1623,18 @@ $("btnExtract").addEventListener("click", async () => {
   const btn = $("btnExtract"); btn.disabled = true; btn.textContent = "Extracting…";
   try {
     const docs = DOCS.map(d => ({id:d.id, text:d.text}));
-    const mentions = $("extractProvider").value === "llm" ? await extractLLM(docs) : extractLocalMentions(docs);
+    const ex = $("extractProvider").value === "local"
+      ? {mentions: extractLocalMentions(docs), relations: []}
+      : await extractLLM(docs);
     const mode = $("resolveMode").value;
-    ENTITIES = mode === "api" ? await resolveApi(mentions) : mergeMentions(mentions, mode);
+    ENTITIES = mode === "api" ? await resolveApi(ex.mentions) : mergeMentions(ex.mentions, mode);
+    RELATIONS = ex.relations || [];
     for (const e of ENTITIES){ if (e.name.length > 64) log("Name over 64 chars will be truncated for CHAR(64): "+e.name, "warn"); }
     renderEntities();
-    const np = ENTITIES.filter(e=>e.label==="Person").length, nb = ENTITIES.length-np;
-    log("Extracted "+ENTITIES.length+" entities ("+np+" people, "+nb+" businesses).", "ok");
+    const byType = {}; for (const e of ENTITIES) byType[e.label] = (byType[e.label]||0)+1;
+    const summary = Object.keys(TYPES).filter(t=>byType[t]).map(t=>byType[t]+" "+t).join(", ") || "0";
+    log("Extracted "+ENTITIES.length+" entities ("+summary+"); "+RELATIONS.length+" relations.", "ok");
+    if ($("extractProvider").value === "local" && ENTITIES.length) log("Local extraction produces no relations — only the EMBEDDED similarity layer will be built.", "warn");
   } catch(e){ log("Extraction failed: "+e.message, "err"); }
   finally { btn.disabled = false; btn.textContent = "Extract entities"; }
 });
@@ -1221,8 +1646,13 @@ $("btnBuildGraph").addEventListener("click", () => {
   const ops = ENTITIES.reduce((n,e)=>n+e.docIds.length,0);
   if (ENTITIES.length*ENTITIES.length*Math.pow(ops/Math.max(1,ENTITIES.length),2) > 2e6)
     log("Large entity/doc set — edge computation may be slow.", "warn");
-  EDGES = computeEdges(ENTITIES, dv);
+  const embedded = computeEdges(ENTITIES, dv);
+  const rel = buildRelationEdges(RELATIONS, ENTITIES);
+  if (rel.dropped) log(rel.dropped+" relation(s) dropped (endpoint not in entity set).", "warn");
+  EDGES = embedded.concat(rel.edges);
+  EDGES.sort((a,b) => b.weight - a.weight);
   renderGraph();
+  populateGraphBox();
   log("Built "+EDGES.length+" candidate edges across "+ENTITIES.length+" entities.", "ok");
 });
 $("btnGraphSql").addEventListener("click", async () => {
@@ -1231,21 +1661,158 @@ $("btnGraphSql").addEventListener("click", async () => {
   try { await navigator.clipboard.writeText(sql); log("Graph SQL copied — "+sql.length+" characters.", "ok"); }
   catch(e){ download("graph_"+stamp()+".sql", sql, "application/sql"); log("Clipboard blocked, downloaded the file instead.", "warn"); }
 });
-$("btnStoreGraph").addEventListener("click", async () => {
-  if (!EDGES.length){ log("Build the graph first.", "warn"); return; }
-  const btn = $("btnStoreGraph"); btn.disabled = true;
-  const bar = $("gbar"); bar.style.display = "block"; const fill = bar.querySelector("span");
+function graphSqlText(mode){
   const opts = graphOpts(); const th = parseFloat($("threshold").value);
+  const parts = [];
+  const ddlOpts = {...opts, createMode: graphDdlMode(mode)};
+  const gd = graphDdl(ddlOpts), md = membershipDdl(ddlOpts);
+  if (gd){ parts.push(gd.nodes, gd.edges); } if (md) parts.push(md);
+  if (mode === "append"){
+    parts.push(...nodeInserts(ENTITIES, {...opts, upsert:true}));
+    parts.push(...edgeUpserts(EDGES, opts));
+  } else {
+    parts.push(...nodeInserts(ENTITIES, opts));
+    parts.push(...edgeInserts(EDGES, opts, th));
+  }
+  parts.push(createGraphSql(opts));
+  return parts.join(";\n\n")+";\n";
+}
+function populateGraphBox(){
+  if (!ENTITIES.length) return;
+  $("graphSqlBox").value = graphSqlText($("writeMode").value);
+}
+$("btnRunGraphSql").addEventListener("click", async () => {
+  const text = $("graphSqlBox").value.trim();
+  if (!text){ log("Nothing in the SQL box to run.", "warn"); return; }
+  const stmts = text.split(/;\s*(?:\n|$)/).map(s => s.trim()).filter(Boolean);
+  const bar = $("gbar"); bar.style.display = "block"; const fill = bar.querySelector("span");
+  const btn = $("btnRunGraphSql"); btn.disabled = true;
   try {
-    const d = graphDdl(opts);
-    if (d){ await ksql(d.nodes); await ksql(d.edges); log("Graph tables ready.", "ok"); }
-    const ni = nodeInserts(ENTITIES, opts), ei = edgeInserts(EDGES, opts, th);
-    const all = ni.concat(ei); let done = 0;
-    for (const stmt of all){ await ksql(stmt); done++; fill.style.width = Math.round(100*done/all.length)+"%"; }
-    log("Stored "+ENTITIES.length+" nodes and "+filterEdges(EDGES,th).length+" edges. Post-join via ARRAY_CONTAINS(doc_ids, doc_id).", "ok");
-  } catch(e){ log("Graph write failed: "+e.message, "err"); log("The SQL is still valid — use Copy graph SQL and run it in Workbench.", "dim"); }
-  finally { btn.disabled = false; setTimeout(()=>{ bar.style.display="none"; fill.style.width="0"; }, 1200); }
+    let graphMade = null;
+    for (let i=0;i<stmts.length;i++){
+      await ksql(stmts[i]);
+      fill.style.width = Math.round(100*(i+1)/stmts.length)+"%";
+      const g = stmts[i].match(/CREATE\s+(?:OR\s+REPLACE\s+)?(?:UN)?DIRECTED\s+GRAPH\s+([A-Za-z_][\w.]*)/i)
+             || stmts[i].match(/CREATE\s+(?:OR\s+REPLACE\s+)?GRAPH\s+([A-Za-z_][\w.]*)/i);
+      if (g){ graphMade = g[1]; log("Graph '"+graphMade+"' created in Kinetica.", "ok"); }
+      else log("Ran statement "+(i+1)+"/"+stmts.length+".", "dim");
+    }
+    log("Ran "+stmts.length+" statements from the SQL box"+
+        (graphMade ? " — graph '"+graphMade+"' is ready to query." : "."), "ok");
+  } catch(e){
+    log("SQL box run failed: "+e.message, "err");
+    log("Statements before the failure were applied; fix and re-run (upserts converge).", "dim");
+  } finally { btn.disabled = false; setTimeout(()=>{ bar.style.display="none"; fill.style.width="0"; }, 1200); }
 });
+async function readRows(sql){ const r = await ksql(sql); return recordsToRows(r.records); }
+
+async function appendBatch(){
+  if (!DOCS.length){ log("Generate embeddings first.", "warn"); return; }
+  const btn = $("btnAppendBatch"); btn.disabled = true;
+  const bar = $("gbar"); bar.style.display = "block"; const fill = bar.querySelector("span");
+  const opts = graphOpts(); const emb = fqName();
+  const k = Math.max(1, parseInt($("knnK").value,10)||20);
+  const beta = Math.max(0, parseFloat($("knnBeta").value)||0.35);
+  const th = parseFloat($("threshold").value);
+  if ($("stampMode").value === "datetime")
+    log("Datestamp is 'datetime' — each append targets a new table set and won't merge with earlier batches. Use 'date' (or a fixed stamp) for incremental append.", "warn");
+  const step = (n,tot) => fill.style.width = Math.round(100*n/tot)+"%";
+  try {
+    // 1. ensure table exists (with if-not-exists semantics for append mode) before max lookup
+    const embCreate = embDdl({ table: emb, createMode: "ifnot", dim: DIM, normalize: $("normalize").checked });
+    if (embCreate) await ksql(embCreate);              // ensure table exists so MAX never errors on absent table
+    // 2. assign global ids
+    const mx = await readRows(maxIdQuery(emb));         // fresh/empty table -> NULL -> base 1; real failure still throws pre-insert
+    const base = nextIdBase(mx && mx.rows.length ? mx.rows[0][0] : null);
+    DOCS.forEach((d,i) => d.id = base + i);
+    log("Assigned doc_ids "+base+".."+(base+DOCS.length-1)+".", "ok");
+    // 3. insert embeddings (append)
+    const ins = insertStatements();
+    for (let i=0;i<ins.length;i++){ await ksql(ins[i]); step(i+1, ins.length+6); }
+    if ($("hnsw").checked){
+      try { await ksql(hnswIndexSql(emb)); }
+      catch(e){ log("HNSW index add skipped (likely already present): "+e.message, "dim"); }
+    }
+    log("Inserted "+DOCS.length+" documents into "+emb+".", "ok");
+    // 4. extract mentions from the new docs
+    const docs = DOCS.map(x => ({id:x.id, text:x.text}));
+    const ex = $("extractProvider").value === "local"
+      ? {mentions: extractLocalMentions(docs), relations: []}
+      : await extractLLM(docs);
+    const mentions = ex.mentions;
+    RELATIONS = ex.relations || [];
+    // 5. incremental identity resolution against the persisted node table
+    const ddlMode = opts.createMode === "replace" ? "ifnot" : opts.createMode;
+    const gd = graphDdl({...opts, createMode: ddlMode}), md = membershipDdl({...opts, createMode: ddlMode});
+    if (gd){ await ksql(gd.nodes); await ksql(gd.edges); } if (md) await ksql(md);
+    const keys = [...new Set(mentions.map(m => blockKey(m.surface, m.label)))];
+    let existingNodes = [];
+    if (keys.length){
+      const nb = await readRows(nodeBlockQuery(graphTableName(opts.prefix,"nodes",opts.stamp,opts.schema), keys));
+      if (nb) existingNodes = nb.rows.map(r => ({ name:r[0], label:(Array.isArray(r[1])?r[1][0]:r[1]),
+        docIds:(Array.isArray(r[2])?r[2]:[]), count:r[3]||0, aliases:(Array.isArray(r[4])?r[4]:[]), block_key:r[5] }));
+    }
+    const res = resolveIncremental(mentions, existingNodes);
+    ENTITIES = res.nodeUpserts;
+    for (const s of nodeInserts(res.nodeUpserts, {...opts, upsert:true})) await ksql(s);
+    for (const s of membershipInserts(res.membership, opts)) await ksql(s);
+    log("Resolved "+res.nodeUpserts.length+" entities; wrote "+res.membership.length+" membership rows.", "ok");
+    // 6. kNN candidate pairs (index-backed, per new doc)
+    const newIds = new Set(DOCS.map(d => d.id));
+    const pairs = []; const neighborDocs = new Set();
+    const seen = new Set();                                          // dedupe new-new to one orientation
+    for (const doc of DOCS){
+      const rows = await readRows(knnQuery(emb, vecLiteral(doc.vec), k, beta, doc.id));
+      if (rows) for (const [j, cos] of rows.rows){
+        if (newIds.has(j)){ const a=Math.min(doc.id,j), b=Math.max(doc.id,j); const key=a+"-"+b;
+          if (seen.has(key)) continue; seen.add(key); pairs.push({i:a, j:b, cos}); }
+        else { pairs.push({i:doc.id, j, cos}); neighborDocs.add(j); }
+      }
+      pairs.push({i:doc.id, j:doc.id, cos:1});                       // same-doc co-occurrence
+    }
+    step(ins.length+3, ins.length+6);
+    // 7. membership for old neighbor docs + new docs -> entity-pair deltas
+    const membership = new Map();
+    for (const m of res.membership){ if (!membership.has(m.docId)) membership.set(m.docId, []); membership.get(m.docId).push({node:m.node, label:m.label}); }
+    if (neighborDocs.size){
+      const mm = await readRows(membershipQuery(graphTableName(opts.prefix,"membership",opts.stamp,opts.schema), [...neighborDocs]));
+      if (mm) for (const [node, docId, label] of mm.rows){ const id=docId|0;
+        if (!membership.has(id)) membership.set(id, []); membership.get(id).push({node, label:(Array.isArray(label)?label[0]:label)}); }
+    }
+    const deltas = docPairContributions(pairs, membership);
+    // 8. merge with existing accumulators and upsert edges
+    const relBuilt = buildRelationEdges(RELATIONS, ENTITIES);
+    if (relBuilt.dropped) log(relBuilt.dropped+" relation(s) dropped (endpoint not in entity set).", "warn");
+    const layerDeltas = deltas.concat(relBuilt.edges.map(e => ({node1:e.node1, node2:e.node2, label:e.label,
+      edge_kind:e.edge_kind, d_wv:e.sum_wv, d_w:e.sum_w})));
+    const names = [...new Set(layerDeltas.flatMap(e => [e.node1, e.node2]))];
+    const accum = new Map();
+    if (names.length){
+      const ea = await readRows(edgeAccumQuery(graphTableName(opts.prefix,"edges",opts.stamp,opts.schema), names));
+      if (ea) for (const [n1,n2,el,swv,sw] of ea.rows) accum.set(n1+"\u0000"+n2+"\u0000"+el, {sum_wv:swv||0, sum_w:sw||0});
+    }
+    EDGES = layerDeltas.map(e => { const m = mergeEdgeAccum(accum.get(e.node1+"\u0000"+e.node2+"\u0000"+e.label), {d_wv:e.d_wv, d_w:e.d_w});
+      return {node1:e.node1, node2:e.node2, label:e.label, edge_kind:e.edge_kind, weight:m.weight, sum_wv:m.sum_wv, sum_w:m.sum_w}; });
+    EDGES.sort((a,b) => b.weight - a.weight);
+    for (const s of edgeUpserts(EDGES, opts)) await ksql(s);
+    step(ins.length+6, ins.length+6);
+    renderGraph();
+    populateGraphBox();
+    log("Updated "+EDGES.length+" edges ("+filterEdges(EDGES,th).length+" at/above "+th.toFixed(2)+"). Run CREATE GRAPH from the SQL box to build the solver graph.", "ok");
+    LAST_TABLE = emb;
+  } catch(e){
+    log("Append failed: "+e.message, "err");
+    log("Node/edge upserts converge on retry, but embeddings and membership are plain inserts — a retry re-inserts these documents under new ids. Prefer fixing the cause, or use Copy graph SQL / the editable box.", "dim");
+  } finally { btn.disabled = false; setTimeout(()=>{ bar.style.display="none"; fill.style.width="0"; }, 1200); }
+}
+
+$("btnAppendBatch").addEventListener("click", appendBatch);
+$("writeMode").addEventListener("change", () => {
+  const append = $("writeMode").value === "append";
+  $("btnAppendBatch").style.display = append ? "" : "none";
+  $("btnBuildGraph").textContent = append ? "Preview graph (local)" : "Build graph";
+});
+$("writeMode").dispatchEvent(new Event("change"));
 
 ["kSchema","kTable","stampMode"].forEach(id => $(id).addEventListener("input", refreshLabel));
 $("stampMode").addEventListener("change", refreshLabel);

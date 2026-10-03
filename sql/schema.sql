@@ -1,6 +1,4 @@
--- xVector reference schema.
--- The app generates this at runtime in ddl(); this file is documentation. If ddl()
--- changes, change this in the same commit. <datestamp> is YYYYMMDD or YYYYMMDD_HHMMSS.
+-- Kept in sync with the emitters in index.html (embDdl/graphDdl/membershipDdl/…). Do not edit independently.
 
 CREATE TABLE IF NOT EXISTS vector_embeddings_<datestamp>
 (
@@ -10,7 +8,8 @@ CREATE TABLE IF NOT EXISTS vector_embeddings_<datestamp>
     char_count INT,
     embed_source VARCHAR(64),
     created_at TIMESTAMP NOT NULL,
-    embedding VECTOR(64, NORMALIZE) NOT NULL
+    embedding VECTOR(64, NORMALIZE) NOT NULL,
+    PRIMARY KEY (doc_id)
 );
 
 -- NORMALIZE gives each inserted vector an L2 magnitude of 1. Drop it if you need the
@@ -59,34 +58,55 @@ FROM vector_embeddings_<datestamp>;
 -- ---- Entity graph (see Entities → Graph in index.html) --------------------
 -- Node identity is the canonical entity NAME (CHAR(64)); edges reference it.
 CREATE TABLE IF NOT EXISTS graph_nodes_<datestamp> (
-    node      CHAR(64)  NOT NULL,   -- NODE  (grammar): canonical entity name
-    label     VARCHAR[] NOT NULL,   -- LABEL: ARRAY['Person'] | ARRAY['Business']
-    doc_ids   INT[]     NOT NULL,   -- documents the entity is stated in (post-join key)
-    doc_count INT,
-    aliases   VARCHAR[],            -- merged surface variants
-    created_at TIMESTAMP NOT NULL
+    node       CHAR(64)  NOT NULL,   -- NODE (grammar): canonical entity name
+    label      VARCHAR[] NOT NULL,   -- LABEL: ARRAY['People'] | ARRAY['Business'] | ARRAY['Organization'] | ARRAY['Facility'] | ARRAY['Location']
+    doc_ids    INT[]     NOT NULL,   -- documents the entity is stated in (post-join key)
+    doc_count  INT,
+    aliases    VARCHAR[],            -- merged surface variants
+    block_key  CHAR(64),             -- blocking key for incremental merging
+    created_at TIMESTAMP NOT NULL,
+    PRIMARY KEY (node)
 );
+
 CREATE TABLE IF NOT EXISTS graph_edges_<datestamp> (
-    node1  CHAR(64)  NOT NULL,      -- NODE1
-    node2  CHAR(64)  NOT NULL,      -- NODE2
-    label  VARCHAR[] NOT NULL,      -- LABEL: ARRAY['person-business']
-    weight FLOAT     NOT NULL,      -- IDW strength (0,1]
-    created_at TIMESTAMP NOT NULL
+    node1      CHAR(64)  NOT NULL,   -- NODE1
+    node2      CHAR(64)  NOT NULL,   -- NODE2
+    label      VARCHAR[] NOT NULL,   -- LABEL: ARRAY['EMBEDDED'] (similarity) or ARRAY['<PREDICATE>'] (relation)
+    edge_label CHAR(32)  NOT NULL,   -- edge label (scalar): edge classifier for two-layer edges
+    edge_kind  CHAR(16)  NOT NULL,   -- edge kind: 'embedded' (similarity) or 'relation' (LLM predicate)
+    weight     FLOAT     NOT NULL,   -- IDW strength (0,1] for similarity; 1.0 for relations
+    sum_wv     DOUBLE,               -- cumulative numerator for incremental update
+    sum_w      DOUBLE,               -- cumulative denominator for incremental update
+    created_at TIMESTAMP NOT NULL,
+    PRIMARY KEY (node1, node2, edge_label)
+);
+
+CREATE TABLE IF NOT EXISTS graph_membership_<datestamp> (
+    node   CHAR(64)  NOT NULL,   -- canonical entity name
+    doc_id INT       NOT NULL,   -- document ID where entity appears
+    label  VARCHAR[] NOT NULL    -- ARRAY['People'] | ARRAY['Business'] | ARRAY['Organization'] | ARRAY['Facility'] | ARRAY['Location']
 );
 
 -- Insert form the app emits (ARRAY[...] literals):
-INSERT INTO graph_nodes_<datestamp> (node, label, doc_ids, doc_count, aliases, created_at) VALUES
-    ('Kaan Karamete', ARRAY['Person'], ARRAY[1,3], 3, ARRAY['K Karamete','Kaan Karamete'], '2026-08-16 10:30:00');
-INSERT INTO graph_edges_<datestamp> (node1, node2, label, weight, created_at) VALUES
-    ('Acme Corp', 'Kaan Karamete', ARRAY['person-business'], 0.732000, '2026-08-16 10:30:00');
+INSERT INTO graph_nodes_<datestamp> (node, label, doc_ids, doc_count, aliases, block_key, created_at) VALUES
+    ('Kaan Karamete', ARRAY['People'], ARRAY[1,3], 3, ARRAY['K Karamete','Kaan Karamete'], 'karamete', '2026-08-16 10:30:00');
+INSERT INTO graph_edges_<datestamp> (node1, node2, label, edge_label, edge_kind, weight, sum_wv, sum_w, created_at) VALUES
+    ('Acme Corp', 'Kaan Karamete', ARRAY['EMBEDDED'], 'EMBEDDED', 'embedded', 0.732000, 0.732000, 1.0, '2026-08-16 10:30:00'),
+    ('Acme Corp', 'Kaan Karamete', ARRAY['WORKS_AT'], 'WORKS_AT', 'relation', 1.0, 1.0, 1.0, '2026-08-16 10:30:00');
+INSERT INTO graph_membership_<datestamp> (node, doc_id, label) VALUES
+    ('Kaan Karamete', 1, ARRAY['People']),
+    ('Acme Corp', 1, ARRAY['Business']);
 
--- Promote to a native graph (strength → cost for solvers):
--- CREATE UNDIRECTED GRAPH entity_graph_<datestamp> (
---   NODES => INPUT_TABLES((SELECT * FROM graph_nodes_<datestamp>)),
---   EDGES => INPUT_TABLES((SELECT node1, node2, label,
---                          (1 - weight) AS WEIGHT_VALUESPECIFIED FROM graph_edges_<datestamp>)));
+-- Promote to a native graph (strength → cost for solvers). OR REPLACE so a
+-- re-run rebuilds from current tables (Kinetica has no DROP GRAPH IF EXISTS).
+-- The graph name is configurable in the app (defaults to entity_graph_<datestamp>):
+CREATE OR REPLACE UNDIRECTED GRAPH entity_graph_<datestamp> (
+  NODES => INPUT_TABLES((SELECT * FROM graph_nodes_<datestamp>)),
+  EDGES => INPUT_TABLES((SELECT node1, node2, label,
+                         (1 - weight) AS WEIGHT_VALUESPECIFIED FROM graph_edges_<datestamp>)));
 
--- Post-join graph nodes back to the embeddings/documents:
-SELECT n.node, e.doc_id, e.content
+-- Post-join graph nodes back to the embeddings/documents via membership:
+SELECT n.node, m.doc_id, e.content
 FROM graph_nodes_<datestamp> n
-JOIN vector_embeddings_<datestamp> e ON ARRAY_CONTAINS(n.doc_ids, e.doc_id);
+JOIN graph_membership_<datestamp> m ON n.node = m.node
+JOIN vector_embeddings_<datestamp> e ON m.doc_id = e.doc_id;
