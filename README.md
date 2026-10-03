@@ -1,5 +1,27 @@
 # xVector
 
+**A kNN-based document entity and relationship extraction engine.**
+
+A large language model asked to build a knowledge graph from text will assert only what a sentence states. Across a
+corpus, that faithfulness is also the method's ceiling: three paragraphs about one family can produce two disconnected
+components, because no single sentence ever names the tie between them. xVector adds a purely additive second pass that
+recovers those ties without touching what the extractor found:
+
+- Each document is split into paragraph chunks and embedded once.
+- A top-*k* nearest-neighbour query, originating only in the new document's chunks but searching every chunk in the
+  graph, yields chunk pairs, which expand through a chunk-to-entity membership map into candidate node pairs.
+- Each pair is scored by Shepard inverse-distance weighting over every chunk pair its endpoints co-occur in.
+- The per-pair accumulators form a commutative monoid, so the pass is order-independent and needs no recomputation as
+  the corpus grows.
+- The implementation is engine-neutral: the same weighted embedded edges go into FalkorDB, Kinetica, ArangoDB or Neo4j
+  through one adapter contract.
+
+**Paper:** B. K. Karamete, H. Casten. *Hidden relationships in a document-derived property graph: top-k chunk
+embeddings and inverse-distance weighting over a dynamically evolving ontology.*
+[arXiv:2609.00387](https://arxiv.org/abs/2609.00387) (2026).
+
+---
+
 Paste paragraphs, get 64-dimension vectors, write them to Kinetica as
 `vector_embeddings_<datestamp>`. One HTML file, no dependencies.
 
