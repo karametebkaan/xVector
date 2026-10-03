@@ -1,0 +1,97 @@
+digraph IdentityGraph {
+    graph [rankdir=TB, bgcolor="#0d1117", fontname="Helvetica", pad="0.5", nodesep="0.6", ranksep="0.8"];
+    node [fontname="Helvetica", fontsize=11, style="filled,rounded", shape=box, margin="0.15,0.1"];
+    edge [fontname="Helvetica", fontsize=9, color="#8b949e", fontcolor="#8b949e"];
+
+    // Subgraph: Source Records (Blue)
+    subgraph cluster_records {
+        label = "Source Touchpoint Records (:Record)";
+        style = "dashed";
+        color = "#58a6ff";
+        fontcolor = "#58a6ff";
+        fontsize = 13;
+
+        r1 [label="Record 1\nkaan\nkpapaz@gmail\n2696227", fillcolor="#1f293d", color="#388bfd", fontcolor="#e6edf3"];
+        r2 [label="Record 2\nkkaramete\nkalles@gmail.com\n5182696226", fillcolor="#1f293d", color="#388bfd", fontcolor="#e6edf3"];
+        r3 [label="Record 3 (Centroid)\nkaan karamete\nkallespapaz@gmail\n404356789", fillcolor="#1c3a5e", color="#58a6ff", penwidth=2, fontcolor="#58a6ff"];
+        r4 [label="Record 4 (Isolated)\ngulgun karamete\ngkaramete@kmail.com\n2696777", fillcolor="#21262d", color="#484f58", fontcolor="#8b949e"];
+    }
+
+    // Subgraph: Name Nodes (Green)
+    subgraph cluster_names {
+        label = "Name Attribute Nodes (:NAME)";
+        style = "dashed";
+        color = "#3fb950";
+        fontcolor = "#3fb950";
+        fontsize = 13;
+
+        n1 [label="NAME: kaan", shape=ellipse, fillcolor="#122c1f", color="#2ea043", fontcolor="#7ee787"];
+        n2 [label="NAME: kkaramete", shape=ellipse, fillcolor="#122c1f", color="#2ea043", fontcolor="#7ee787"];
+        n3 [label="NAME: kaan karamete\n[GOLDEN NAME - PR: 0.153]", shape=ellipse, fillcolor="#1b472e", color="#3fb950", penwidth=2.5, fontcolor="#aff5b4"];
+        n4 [label="NAME: gulgun karamete", shape=ellipse, fillcolor="#21262d", color="#484f58", fontcolor="#8b949e"];
+    }
+
+    // Subgraph: Email Nodes (Orange)
+    subgraph cluster_emails {
+        label = "Email Attribute Nodes (:EMAIL)";
+        style = "dashed";
+        color = "#d29922";
+        fontcolor = "#d29922";
+        fontsize = 13;
+
+        e1 [label="EMAIL: kpapaz@gmail", shape=note, fillcolor="#342411", color="#bb8009", fontcolor="#f0883e"];
+        e2 [label="EMAIL: kalles@gmail.com", shape=note, fillcolor="#342411", color="#bb8009", fontcolor="#f0883e"];
+        e3 [label="EMAIL: kallespapaz@gmail\n[GOLDEN EMAIL - PR: 0.153]", shape=note, fillcolor="#4e3518", color="#d29922", penwidth=2.5, fontcolor="#ffd699"];
+        e4 [label="EMAIL: gkaramete@kmail.com", shape=note, fillcolor="#21262d", color="#484f58", fontcolor="#8b949e"];
+    }
+
+    // Subgraph: Phone Nodes (Purple)
+    subgraph cluster_phones {
+        label = "Phone Attribute Nodes (:PHONE)";
+        style = "dashed";
+        color = "#a371f7";
+        fontcolor = "#a371f7";
+        fontsize = 13;
+
+        p1 [label="PHONE: 2696227", shape=component, fillcolor="#2b1f3f", color="#8957e5", fontcolor="#d2a8ff"];
+        p2 [label="PHONE: 5182696226\n[GOLDEN PHONE - PR: 0.110]", shape=component, fillcolor="#3d2a5d", color="#a371f7", penwidth=2.5, fontcolor="#e2c5ff"];
+        p3 [label="PHONE: 404356789", shape=component, fillcolor="#2b1f3f", color="#8957e5", fontcolor="#d2a8ff"];
+        p4 [label="PHONE: 2696777", shape=component, fillcolor="#21262d", color="#484f58", fontcolor="#8b949e"];
+    }
+
+    // Structural Edges (Record -> Attribute)
+    edge [color="#30363d", style="dotted", arrowsize=0.6];
+    r1 -> n1 [label=":HAS_NAME"];
+    r1 -> e1 [label=":HAS_EMAIL"];
+    r1 -> p1 [label=":HAS_PHONE"];
+
+    r2 -> n2 [label=":HAS_NAME"];
+    r2 -> e2 [label=":HAS_EMAIL"];
+    r2 -> p2 [label=":HAS_PHONE"];
+
+    r3 -> n3 [label=":HAS_NAME"];
+    r3 -> e3 [label=":HAS_EMAIL"];
+    r3 -> p3 [label=":HAS_PHONE"];
+
+    r4 -> n4 [label=":HAS_NAME"];
+    r4 -> e4 [label=":HAS_EMAIL"];
+    r4 -> p4 [label=":HAS_PHONE"];
+
+    // Fuzzy Similarity Edges between Names (Green)
+    edge [color="#3fb950", style="solid", penwidth=2, arrowsize=0.8, fontcolor="#7ee787"];
+    n1 -> n3 [label="token_containment\n(0.925)", dir=both];
+    n2 -> n3 [label="initial_surname\n(0.920)", dir=both];
+
+    // Fuzzy Similarity Edges between Emails (Orange)
+    edge [color="#d29922", style="solid", penwidth=2, arrowsize=0.8, fontcolor="#f0883e"];
+    e1 -> e3 [label="subword_papaz\n(0.820)", dir=both];
+    e2 -> e3 [label="prefix_kalles\n(0.882)", dir=both];
+
+    // Fuzzy Similarity Edges between Phones (Purple)
+    edge [color="#a371f7", style="solid", penwidth=2, arrowsize=0.8, fontcolor="#d2a8ff"];
+    p1 -> p2 [label="suffix_1diff\n(0.820)", dir=both];
+
+    // Family Conflict Edge (Red / Blocked)
+    edge [color="#f85149", style="dashed", penwidth=2.5, fontcolor="#f85149"];
+    n4 -> n3 [label="FAMILY CONFLICT\n(Penalty: 0.85)", dir=none];
+}

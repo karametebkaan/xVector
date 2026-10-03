@@ -1,0 +1,17 @@
+* text=auto
+
+# Unix scripts (prevents "bad interpreter" and syntax/variable parsing failures)
+*.sh text eol=lf
+*.bash text eol=lf
+*.zsh text eol=lf
+*.ksh text eol=lf
+
+# Makefiles (prevents backslash continuation and recipe subshell failures)
+Makefile text eol=lf
+makefile text eol=lf
+GNUmakefile text eol=lf
+*.mk text eol=lf
+
+# Windows command scripts (prevents cmd.exe block, label, and offset bugs)
+*.bat text eol=crlf
+*.cmd text eol=crlf

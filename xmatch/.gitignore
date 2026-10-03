@@ -1,0 +1,61 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Node / Vite Frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+*.tsbuildinfo
+frontend/tsconfig.tsbuildinfo
+
+# Databases & Runtime Logs
+*.duckdb
+*.duckdb.wal
+logs/
+*.log
+
+# Operating System Files
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+*.stackdump
+$RECYCLE.BIN/
+
+# Editor and IDE Files
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.history/
+*.code-workspace
+.idea/**/workspace.xml
+.idea/**/tasks.xml
+.idea/**/usage.statistics.xml
+.idea/**/shelf
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+.vs/
+*.swp
+*.swo
+*~
+
+# Local Environment Overrides
+.env
+.env.local
+.env.*.local

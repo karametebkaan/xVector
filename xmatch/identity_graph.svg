@@ -1,0 +1,189 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1150 780" width="100%" height="100%" style="background-color: #0d1117; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;">
+  <defs>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.5"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#8b949e"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#3fb950"/>
+    </marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#d29922"/>
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#a371f7"/>
+    </marker>
+  </defs>
+
+  <!-- Title Header -->
+  <text x="575" y="40" text-anchor="middle" fill="#58a6ff" font-size="22" font-weight="bold">FalkorDB Unified Heterogeneous Identity Graph</text>
+  <text x="575" y="65" text-anchor="middle" fill="#8b949e" font-size="13">One Graph in GraphBLAS with :Record, :NAME, :EMAIL, and :PHONE Node Labels</text>
+
+  <!-- ==================== RECORD NODES (TOP ROW) ==================== -->
+  <!-- Record 1 -->
+  <g transform="translate(60, 100)" filter="url(#shadow)">
+    <rect width="210" height="90" rx="10" fill="#161b22" stroke="#388bfd" stroke-width="2"/>
+    <text x="105" y="28" text-anchor="middle" fill="#58a6ff" font-size="14" font-weight="bold">(:Record {id: 1})</text>
+    <text x="15" y="50" fill="#c9d1d9" font-size="11">name: 'kaan'</text>
+    <text x="15" y="66" fill="#c9d1d9" font-size="11">email: 'kpapaz@gmail'</text>
+    <text x="15" y="82" fill="#c9d1d9" font-size="11">phone: '2696227'</text>
+  </g>
+
+  <!-- Record 3 (Golden Centroid) -->
+  <g transform="translate(470, 90)" filter="url(#shadow)">
+    <rect width="230" height="110" rx="10" fill="#1c2d42" stroke="#58a6ff" stroke-width="3"/>
+    <rect x="15" y="10" width="200" height="20" rx="4" fill="#1f6feb"/>
+    <text x="115" y="24" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="bold">ENTITY CENTROID (PR: 0.435)</text>
+    <text x="115" y="50" text-anchor="middle" fill="#79c0ff" font-size="15" font-weight="bold">(:Record {id: 3})</text>
+    <text x="15" y="72" fill="#e6edf3" font-size="11">name: 'kaan karamete'</text>
+    <text x="15" y="88" fill="#e6edf3" font-size="11">email: 'kallespapaz@gmail'</text>
+    <text x="15" y="104" fill="#e6edf3" font-size="11">phone: '404356789'</text>
+  </g>
+
+  <!-- Record 2 -->
+  <g transform="translate(880, 100)" filter="url(#shadow)">
+    <rect width="210" height="90" rx="10" fill="#161b22" stroke="#388bfd" stroke-width="2"/>
+    <text x="105" y="28" text-anchor="middle" fill="#58a6ff" font-size="14" font-weight="bold">(:Record {id: 2})</text>
+    <text x="15" y="50" fill="#c9d1d9" font-size="11">name: 'kkaramete'</text>
+    <text x="15" y="66" fill="#c9d1d9" font-size="11">email: 'kalles@gmail.com'</text>
+    <text x="15" y="82" fill="#c9d1d9" font-size="11">phone: '5182696226'</text>
+  </g>
+
+  <!-- Record 4 (Isolated / Family) -->
+  <g transform="translate(470, 640)" filter="url(#shadow)">
+    <rect width="230" height="90" rx="10" fill="#161b22" stroke="#f85149" stroke-width="1.5" stroke-dasharray="4"/>
+    <text x="115" y="25" text-anchor="middle" fill="#f85149" font-size="13" font-weight="bold">(:Record {id: 4}) - Isolated Family</text>
+    <text x="15" y="47" fill="#8b949e" font-size="11">name: 'gulgun karamete'</text>
+    <text x="15" y="63" fill="#8b949e" font-size="11">email: 'gkaramete@kmail.com'</text>
+    <text x="15" y="79" fill="#8b949e" font-size="11">phone: '2696777'</text>
+  </g>
+
+  <!-- ==================== NAME LAYER (:NAME) ==================== -->
+  <text x="60" y="270" fill="#3fb950" font-size="14" font-weight="bold">Layer: :NAME</text>
+
+  <!-- Name 1 -->
+  <g transform="translate(70, 285)" filter="url(#shadow)">
+    <rect width="190" height="50" rx="25" fill="#122c1f" stroke="#2ea043" stroke-width="2"/>
+    <text x="95" y="26" text-anchor="middle" fill="#7ee787" font-size="12" font-weight="bold">(:NAME)</text>
+    <text x="95" y="42" text-anchor="middle" fill="#e6edf3" font-size="11">'kaan'</text>
+  </g>
+
+  <!-- Name 3 (Golden Name) -->
+  <g transform="translate(475, 275)" filter="url(#shadow)">
+    <rect width="220" height="65" rx="30" fill="#184227" stroke="#3fb950" stroke-width="3"/>
+    <text x="110" y="22" text-anchor="middle" fill="#aff5b4" font-size="10" font-weight="bold">★ GOLDEN NAME (PR: 0.153)</text>
+    <text x="110" y="40" text-anchor="middle" fill="#7ee787" font-size="13" font-weight="bold">(:NAME)</text>
+    <text x="110" y="56" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="bold">'kaan karamete'</text>
+  </g>
+
+  <!-- Name 2 -->
+  <g transform="translate(890, 285)" filter="url(#shadow)">
+    <rect width="190" height="50" rx="25" fill="#122c1f" stroke="#2ea043" stroke-width="2"/>
+    <text x="95" y="26" text-anchor="middle" fill="#7ee787" font-size="12" font-weight="bold">(:NAME)</text>
+    <text x="95" y="42" text-anchor="middle" fill="#e6edf3" font-size="11">'kkaramete'</text>
+  </g>
+
+  <!-- Name 4 -->
+  <g transform="translate(200, 660)" filter="url(#shadow)">
+    <rect width="190" height="50" rx="25" fill="#21262d" stroke="#8b949e" stroke-width="1.5"/>
+    <text x="95" y="26" text-anchor="middle" fill="#8b949e" font-size="12" font-weight="bold">(:NAME)</text>
+    <text x="95" y="42" text-anchor="middle" fill="#c9d1d9" font-size="11">'gulgun karamete'</text>
+  </g>
+
+  <!-- Name Similarities -->
+  <path d="M 260 310 L 475 305" stroke="#3fb950" stroke-width="2.5" marker-end="url(#arrow-green)" marker-start="url(#arrow-green)"/>
+  <rect x="300" y="292" width="135" height="20" rx="4" fill="#0d1117" stroke="#2ea043" stroke-width="1"/>
+  <text x="367" y="306" text-anchor="middle" fill="#7ee787" font-size="10">token_containment (0.925)</text>
+
+  <path d="M 890 310 L 695 305" stroke="#3fb950" stroke-width="2.5" marker-end="url(#arrow-green)" marker-start="url(#arrow-green)"/>
+  <rect x="735" y="292" width="125" height="20" rx="4" fill="#0d1117" stroke="#2ea043" stroke-width="1"/>
+  <text x="797" y="306" text-anchor="middle" fill="#7ee787" font-size="10">initial_surname (0.920)</text>
+
+  <!-- Family Conflict Edge -->
+  <path d="M 390 685 Q 585 580 585 340" stroke="#f85149" stroke-width="2.5" stroke-dasharray="6,4"/>
+  <rect x="440" y="530" width="180" height="22" rx="4" fill="#321014" stroke="#f85149" stroke-width="1"/>
+  <text x="530" y="545" text-anchor="middle" fill="#ff7b72" font-size="10" font-weight="bold">FAMILY CONFLICT (Penalty: 0.85)</text>
+
+  <!-- ==================== EMAIL LAYER (:EMAIL) ==================== -->
+  <text x="60" y="390" fill="#d29922" font-size="14" font-weight="bold">Layer: :EMAIL</text>
+
+  <!-- Email 1 -->
+  <g transform="translate(70, 405)" filter="url(#shadow)">
+    <rect width="190" height="50" rx="6" fill="#2d1d0c" stroke="#bb8009" stroke-width="2"/>
+    <text x="95" y="26" text-anchor="middle" fill="#f0883e" font-size="12" font-weight="bold">(:EMAIL)</text>
+    <text x="95" y="42" text-anchor="middle" fill="#e6edf3" font-size="11">'kpapaz@gmail'</text>
+  </g>
+
+  <!-- Email 3 (Golden Email) -->
+  <g transform="translate(475, 395)" filter="url(#shadow)">
+    <rect width="220" height="65" rx="8" fill="#432c12" stroke="#d29922" stroke-width="3"/>
+    <text x="110" y="22" text-anchor="middle" fill="#ffd699" font-size="10" font-weight="bold">★ GOLDEN EMAIL (PR: 0.153)</text>
+    <text x="110" y="40" text-anchor="middle" fill="#f0883e" font-size="13" font-weight="bold">(:EMAIL)</text>
+    <text x="110" y="56" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="bold">'kallespapaz@gmail'</text>
+  </g>
+
+  <!-- Email 2 -->
+  <g transform="translate(890, 405)" filter="url(#shadow)">
+    <rect width="190" height="50" rx="6" fill="#2d1d0c" stroke="#bb8009" stroke-width="2"/>
+    <text x="95" y="26" text-anchor="middle" fill="#f0883e" font-size="12" font-weight="bold">(:EMAIL)</text>
+    <text x="95" y="42" text-anchor="middle" fill="#e6edf3" font-size="11">'kalles@gmail.com'</text>
+  </g>
+
+  <!-- Email Similarities -->
+  <path d="M 260 430 L 475 425" stroke="#d29922" stroke-width="2.5" marker-end="url(#arrow-orange)" marker-start="url(#arrow-orange)"/>
+  <rect x="310" y="412" width="125" height="20" rx="4" fill="#0d1117" stroke="#bb8009" stroke-width="1"/>
+  <text x="372" y="426" text-anchor="middle" fill="#f0883e" font-size="10">subword_papaz (0.820)</text>
+
+  <path d="M 890 430 L 695 425" stroke="#d29922" stroke-width="2.5" marker-end="url(#arrow-orange)" marker-start="url(#arrow-orange)"/>
+  <rect x="735" y="412" width="120" height="20" rx="4" fill="#0d1117" stroke="#bb8009" stroke-width="1"/>
+  <text x="795" y="426" text-anchor="middle" fill="#f0883e" font-size="10">prefix_kalles (0.882)</text>
+
+  <!-- ==================== PHONE LAYER (:PHONE) ==================== -->
+  <text x="60" y="510" fill="#a371f7" font-size="14" font-weight="bold">Layer: :PHONE</text>
+
+  <!-- Phone 1 -->
+  <g transform="translate(70, 525)" filter="url(#shadow)">
+    <polygon points="10,0 180,0 190,25 180,50 10,50 0,25" fill="#261a38" stroke="#8957e5" stroke-width="2"/>
+    <text x="95" y="26" text-anchor="middle" fill="#d2a8ff" font-size="12" font-weight="bold">(:PHONE)</text>
+    <text x="95" y="42" text-anchor="middle" fill="#e6edf3" font-size="11">'2696227'</text>
+  </g>
+
+  <!-- Phone 3 -->
+  <g transform="translate(485, 525)" filter="url(#shadow)">
+    <polygon points="10,0 190,0 200,25 190,50 10,50 0,25" fill="#261a38" stroke="#8957e5" stroke-width="2"/>
+    <text x="100" y="26" text-anchor="middle" fill="#d2a8ff" font-size="12" font-weight="bold">(:PHONE)</text>
+    <text x="100" y="42" text-anchor="middle" fill="#e6edf3" font-size="11">'404356789'</text>
+  </g>
+
+  <!-- Phone 2 (Golden Phone) -->
+  <g transform="translate(875, 515)" filter="url(#shadow)">
+    <polygon points="12,0 208,0 220,32 208,65 12,65 0,32" fill="#392454" stroke="#a371f7" stroke-width="3"/>
+    <text x="110" y="22" text-anchor="middle" fill="#e2c5ff" font-size="10" font-weight="bold">★ GOLDEN PHONE (PR: 0.110)</text>
+    <text x="110" y="40" text-anchor="middle" fill="#d2a8ff" font-size="13" font-weight="bold">(:PHONE)</text>
+    <text x="110" y="56" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="bold">'5182696226' (10-Digit)</text>
+  </g>
+
+  <!-- Phone Similarity: Curved line from P1 to P2 -->
+  <path d="M 165 575 C 165 620, 985 620, 985 580" fill="none" stroke="#a371f7" stroke-width="2.5" marker-end="url(#arrow-purple)" marker-start="url(#arrow-purple)"/>
+  <rect x="510" y="600" width="130" height="20" rx="4" fill="#0d1117" stroke="#8957e5" stroke-width="1"/>
+  <text x="575" y="614" text-anchor="middle" fill="#d2a8ff" font-size="10">suffix_1diff (0.820)</text>
+
+  <!-- ==================== RECORD TO ATTRIBUTE EDGES ==================== -->
+  <!-- R1 links -->
+  <path d="M 165 190 L 165 285" stroke="#388bfd" stroke-dasharray="3,3" stroke-width="1.5"/>
+  <path d="M 130 190 C 130 240, 90 350, 110 405" stroke="#388bfd" stroke-dasharray="3,3" stroke-width="1.5"/>
+  <path d="M 100 190 C 80 250, 40 450, 90 525" stroke="#388bfd" stroke-dasharray="3,3" stroke-width="1.5"/>
+
+  <!-- R3 links -->
+  <path d="M 585 200 L 585 275" stroke="#58a6ff" stroke-dasharray="3,3" stroke-width="2"/>
+  <path d="M 585 340 L 585 395" stroke="#58a6ff" stroke-dasharray="3,3" stroke-width="2"/>
+  <path d="M 585 460 L 585 525" stroke="#58a6ff" stroke-dasharray="3,3" stroke-width="2"/>
+
+  <!-- R2 links -->
+  <path d="M 985 190 L 985 285" stroke="#388bfd" stroke-dasharray="3,3" stroke-width="1.5"/>
+  <path d="M 1020 190 C 1020 240, 1050 350, 1040 405" stroke="#388bfd" stroke-dasharray="3,3" stroke-width="1.5"/>
+  <path d="M 1050 190 C 1070 250, 1100 450, 1050 515" stroke="#388bfd" stroke-dasharray="3,3" stroke-width="1.5"/>
+
+</svg>

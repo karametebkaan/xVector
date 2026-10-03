@@ -69,3 +69,25 @@ To build a graph incrementally with new documents and entities:
    blocking key, edges accumulate their IDW weights over time.
 
 See CLAUDE.md for how the pieces fit together and what's unfinished.
+
+## xMatch: identity resolution (`xmatch/`)
+
+`xmatch/` is a self-contained companion module: multi-layer identity resolution and golden-record synthesis over
+sparse `name` / `email` / `phone` records. It is independent of the xVector pipeline above and has its own
+dependencies, tests and UI.
+
+- **Blocking:** DuckDB generates candidate pairs.
+- **Scoring:** RapidFuzz scores each pair, weighting name 45%, email 40% and phone 15%, with a guard against
+  merging relatives who share a surname.
+- **Graph:** FalkorDB (GraphBLAS) holds records and attributes as a bipartite graph and resolves the identities.
+  Weakly connected components group the records; multi-layer PageRank picks each golden attribute.
+
+```bash
+cd xmatch
+./setup.sh        # virtualenv + Python deps + frontend packages
+./run.sh          # end-to-end CLI demo
+./start_ui.sh     # React Studio + FastAPI backend (http://localhost:5173)
+.venv/bin/pytest  # tests; the graph tests need FalkorDB on localhost:6379
+```
+
+See `xmatch/README.md` for the architecture and the SQL / openCypher at each step.
