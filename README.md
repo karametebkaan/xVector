@@ -91,3 +91,7 @@ cd xmatch
 ```
 
 See `xmatch/README.md` for the architecture and the SQL / openCypher at each step.
+
+## License
+
+MIT, Copyright (c) 2026 Graph AI LLC. See [LICENSE](LICENSE).
