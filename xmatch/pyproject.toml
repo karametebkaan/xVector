@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "xmatch"
 version = "0.1.0"
 description = "Billion-scale entity resolution and golden record synthesis with DuckDB and FalkorDB"
-authors = [{ name = "Babel Street" }]
+authors = [{ name = "Graph AI LLC" }]
 dependencies = [
     "duckdb>=1.0.0",
     "falkordb>=1.7.0",

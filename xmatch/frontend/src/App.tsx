@@ -129,7 +129,7 @@ export function App() {
       {/* Footer */}
       <footer className="border-t border-[#21262d] bg-[#0d1117] px-6 py-3 text-xs text-slate-500 font-mono">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-2">
-          <span>xMatch Studio POC &bull; Babel Street</span>
+          <span>xMatch Studio POC &bull; Graph AI LLC</span>
           <div className="flex items-center gap-4">
             <span>GraphBLAS SuiteSparse Engine</span>
             <span>DuckDB 1.5.5 Vectorized Ingestion</span>

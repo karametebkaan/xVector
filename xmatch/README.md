@@ -564,7 +564,7 @@ $$\mathbf{A}_{\text{name}}, \quad \mathbf{A}_{\text{email}}, \quad \mathbf{A}_{\
 We have built a dedicated **React + TypeScript frontend application** (`frontend/`) and **FastAPI backend** (`xmatch/api.py`) showcasing the entire identity resolution pipeline with an **in-browser Graphviz DOT visualizer**.
 
 > [!TIP]
-> **xGraph Architectural Alignment**: The frontend leverages the exact same technology stack and DOT rendering mechanism as the [`xGraph`](file:///home/bkaramete/babelstreet/reactbgraph/babelgraph) platform (`@hpcc-js/wasm-graphviz` with dynamic WebAssembly loading, React 18, Vite, and dark enterprise styling). This POC is built to cleanly drop into `xGraph` as an identity resolution tab.
+> **xGraph Architectural Alignment**: The frontend leverages the exact same technology stack and DOT rendering mechanism as the [`xGraph`](https://github.com/karametebkaan/xgraph) platform (`@hpcc-js/wasm-graphviz` with dynamic WebAssembly loading, React 18, Vite, and dark enterprise styling). This POC is built to cleanly drop into `xGraph` as an identity resolution tab.
 
 ### Launching xMatch Studio
 To launch both the FastAPI backend (port `8002`) and the React Vite UI (port `5173`):
