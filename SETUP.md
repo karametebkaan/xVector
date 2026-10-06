@@ -9,15 +9,14 @@ talks to.
 Python 3 (stdlib only). No packages to install.
 
 ```bash
-python3 scripts/serve.py                 # serves :8000, proxies /kinetica → :9191
+python3 scripts/serve.py                 # serves :8181, proxies /kinetica → :9191
 ```
 
-Then open http://localhost:8000 and set **Instance URL** to `/kinetica`.
+Then open http://localhost:8181 and set **Instance URL** to `/kinetica`.
 
-> **Port conflict:** Kinetica Workbench also uses `:8000`. Serve xVector on
-> another port with `--port`, e.g. `python3 scripts/serve.py --port 8181`, and
-> open http://localhost:8181. The `/kinetica` and `/ollama` proxy routes are
-> relative to whatever port you serve on, so nothing else changes.
+> **Ports:** the default is `:8181`, which stays clear of Kinetica Workbench on `:8000`. Serve on
+> another port with `--port`, e.g. `python3 scripts/serve.py --port 8282`. The `/kinetica` and
+> `/ollama` proxy routes are relative to whatever port you serve on, so nothing else changes.
 
 ## 2. Kinetica (required for the Store/Search steps)
 
@@ -65,10 +64,10 @@ running as a background service — don't start a second one.
 serve.py proxies both backends through same-origin routes:
 
 ```bash
-python3 scripts/serve.py --port 8181 --kinetica http://localhost:9191 --ollama http://localhost:11434
+python3 scripts/serve.py --kinetica http://localhost:9191 --ollama http://localhost:11434
 ```
 
-(`--port 8181` avoids Kinetica Workbench on `:8000`; drop it if `:8000` is free.)
+(It serves on `:8181` by default; pass `--port` to change it.)
 
 ## 5. LLM providers for extraction
 
